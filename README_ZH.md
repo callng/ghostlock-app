@@ -10,6 +10,8 @@
 | OPPO Find X8 (PKB110)        | MT6991 | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      |
 | Xiaomi 17 Pro Max (popsicle) | SM8850 | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` |
 | Xiaomi 15 Pro (haotian)      | SM8750 | `6.6.77-android15-8-gca30f3b4bef6-abogki440974771-4k`  |
+| Redmi K90 Pro Max (myron)    | SM8850 | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` |
+| OnePlus 13T (PKX110)         | SM8750 | `6.6.118-android15-8-g93e223c276e7-abogki500782043-4k` |
 
 启动时按 `uname -r` 精确匹配 offset 表，未匹配的内核会直接拒绝运行；App 顶部会显示「内核支持 / 不支持」。
 

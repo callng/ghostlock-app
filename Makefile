@@ -34,6 +34,10 @@ SRCS := \
   src/core/pipe.c \
   src/core/root.c
 
+# Headers are inputs too: changing offsets.h/target.h must rebuild.
+HDRS := $(wildcard src/core/*.h) $(wildcard src/devices/*.h) \
+        $(wildcard src/devices/*/offsets.h)
+
 # Device offsets are selected at runtime from uname -r.
 TARGET_CONFIG ?= target.h
 
@@ -45,10 +49,10 @@ LDFLAGS := -fPIE -pie -pthread
 
 all: ghostlock
 
-ghostlock: $(SRCS)
+ghostlock: $(SRCS) $(HDRS)
 	@echo "Using NDK compiler: $(NDK_CC)"
 	@echo "Target config: $(TARGET_CONFIG)"
-	$(NDK_CC) $(CFLAGS) $(LDFLAGS) $^ -o ghostlock
+	$(NDK_CC) $(CFLAGS) $(LDFLAGS) $(SRCS) -o ghostlock
 
 product: ghostlock
 	@echo "=== ghostlock binary ready: ./ghostlock ==="

@@ -5,11 +5,13 @@
 ## Supported Devices
 
 | Device                       | SoC    | Kernel                                                 |
-| ---------------------------- | ------ | ------------------------------------------------------ |
+|------------------------------|--------|--------------------------------------------------------|
 | OPPO Find N5 (PKH110)        | SM8750 | `6.6.118-android15-8-g2e6b9c3812c5-ab15114928-4k`      |
 | OPPO Find X8 (PKB110)        | MT6991 | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      |
 | Xiaomi 17 Pro Max (popsicle) | SM8850 | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` |
 | Xiaomi 15 Pro (haotian)      | SM8750 | `6.6.77-android15-8-gca30f3b4bef6-abogki440974771-4k`  |
+| Redmi K90 Pro Max (myron)    | SM8850 | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` |
+| OnePlus 13T (PKX110)         | SM8750 | `6.6.118-android15-8-g93e223c276e7-abogki500782043-4k` |
 
 At startup the kernel is matched against the offset tables via `uname -r`; unsupported kernels are rejected immediately. The app shows the kernel support status at the top.
 
@@ -17,13 +19,13 @@ At startup the kernel is matched against the offset tables via `uname -r`; unsup
 
 ### Prerequisites
 
-| Tool | Version | How to install |
-| --- | --- | --- |
-| JDK | 17+ | e.g. `winget install EclipseAdoptium.Temurin.17.JDK` |
-| Android SDK | platform 37 + build-tools | Android Studio SDK Manager, or Android command-line tools |
-| Android NDK | r28+ (must ship `aarch64-linux-android35-clang.cmd`) | SDK Manager → "NDK (Side by side)" |
-| GNU make | 3.81+ | `winget install GnuWin32.Make` |
-| adb (optional) | latest | SDK platform-tools |
+| Tool           | Version                                              | How to install                                            |
+|----------------|------------------------------------------------------|-----------------------------------------------------------|
+| JDK            | 17+                                                  | e.g. `winget install EclipseAdoptium.Temurin.17.JDK`      |
+| Android SDK    | platform 37 + build-tools                            | Android Studio SDK Manager, or Android command-line tools |
+| Android NDK    | r28+ (must ship `aarch64-linux-android35-clang.cmd`) | SDK Manager → "NDK (Side by side)"                        |
+| GNU make       | 3.81+                                                | `winget install GnuWin32.Make`                            |
+| adb (optional) | latest                                               | SDK platform-tools                                        |
 
 Notes:
 
