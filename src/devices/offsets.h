@@ -50,6 +50,7 @@ static const struct kernel_offsets known_offsets[] = {
 #include "findx8/offsets.h"
 #include "xiaomi17promax/offsets.h"
 #include "xiaomi15pro/offsets.h"
+#include "redmik90promax/offsets.h"
   { .uname_r = NULL }
 };
 
