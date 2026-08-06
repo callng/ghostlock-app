@@ -2,8 +2,11 @@
 local.properties
 .gradle/
 .idea/
+.reasonix/
 *.iml
 app/build/
+app/release/
+app/debug/
 libghostlock.so
 build/
 .DS_Store

@@ -13,6 +13,42 @@
 
 At startup the kernel is matched against the offset tables via `uname -r`; unsupported kernels are rejected immediately. The app shows the kernel support status at the top.
 
+## Building on Windows
+
+### Prerequisites
+
+| Tool | Version | How to install |
+| --- | --- | --- |
+| JDK | 17+ | e.g. `winget install EclipseAdoptium.Temurin.17.JDK` |
+| Android SDK | platform 37 + build-tools | Android Studio SDK Manager, or Android command-line tools |
+| Android NDK | r28+ (must ship `aarch64-linux-android35-clang.cmd`) | SDK Manager → "NDK (Side by side)" |
+| GNU make | 3.81+ | `winget install GnuWin32.Make` |
+| adb (optional) | latest | SDK platform-tools |
+
+Notes:
+
+- GnuWin32 make installs to `C:\Program Files (x86)\GnuWin32\bin` — open a new terminal (or add it to `PATH` manually) so `make` is found.
+- The Android SDK location is read from `local.properties` (`sdk.dir`) or the `ANDROID_HOME` environment variable.
+- The Makefile auto-detects the NDK from `LOCALAPPDATA`/`ANDROID_HOME` and picks the **newest NDK that supports the target API (35)**. Older NDKs (e.g. r26, which only ships clang wrappers up to android-34) are skipped automatically; you can also force a version with `NDK_ROOT`.
+
+### Build the APK
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+Output: `app\build\outputs\apk\debug\app-debug.apk`
+
+The Gradle build calls `make` to compile the native binary and packages it into the APK as `libghostlock.so` (arm64-v8a).
+
+### Build only the native binary
+
+```powershell
+make ghostlock
+```
+
+Output: `ghostlock` in the project root — see [Command-Line Debugging](#command-line-debugging) for how to run it on a device. Use `make clean` to remove the binary.
+
 ## Quick Start
 
 Open the **GhostLock** app and tap **Run**; the exploit runs automatically.

@@ -1,9 +1,23 @@
 API ?= 35
 
+# GnuWin32 make ships no rm.exe; route clean through cmd's del on Windows.
+ifeq ($(OS),Windows_NT)
+  RM := cmd /c del /f /q
+else
+  RM := rm -f
+endif
+
 # Auto-detect NDK
 ifeq ($(OS),Windows_NT)
-  NDK_ROOT ?= $(subst \,/,$(firstword $(wildcard     $(subst \,/,$(LOCALAPPDATA))/Android/Sdk/ndk/*     $(subst \,/,$(ANDROID_HOME))/ndk/*     D:/AndroidSDK/ndk/*)))
   PREBUILT := windows-x86_64
+  NDK_CANDIDATES := \
+    $(subst \,/,$(wildcard $(subst \,/,$(LOCALAPPDATA))/Android/Sdk/ndk/*)) \
+    $(subst \,/,$(wildcard $(subst \,/,$(ANDROID_HOME))/ndk/*)) \
+    $(subst \,/,$(wildcard D:/AndroidSDK/ndk/*))
+  # Only NDKs that ship the aarch64-linux-android$(API) clang wrapper qualify;
+  # pick the newest such NDK (NDK directory names sort by version).
+  NDK_WITH_API := $(foreach d,$(NDK_CANDIDATES),$(if $(wildcard $(d)/toolchains/llvm/prebuilt/$(PREBUILT)/bin/aarch64-linux-android$(API)-clang.cmd),$(d)))
+  NDK_ROOT ?= $(if $(NDK_WITH_API),$(lastword $(sort $(NDK_WITH_API))),$(error No NDK supporting aarch64-linux-android$(API) found under LOCALAPPDATA/ANDROID_HOME. Install NDK r28+ or set NDK_ROOT=...))
   CLANG_BASE := aarch64-linux-android$(API)-clang
   NDK_CC := $(NDK_ROOT)/toolchains/llvm/prebuilt/$(PREBUILT)/bin/$(CLANG_BASE).cmd
 else
@@ -41,4 +55,4 @@ product: ghostlock
 	@echo "构建 APK: .\gradlew.bat :app:assembleDebug"
 
 clean:
-	rm -f ghostlock
+	-$(RM) ghostlock 2>nul

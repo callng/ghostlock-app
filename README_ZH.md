@@ -5,13 +5,49 @@
 ## 支持的设备
 
 | Device                       | SoC    | Kernel                                                 |
-| ---------------------------- | ------ | ------------------------------------------------------ |
+|------------------------------|--------|--------------------------------------------------------|
 | OPPO Find N5 (PKH110)        | SM8750 | `6.6.118-android15-8-g2e6b9c3812c5-ab15114928-4k`      |
 | OPPO Find X8 (PKB110)        | MT6991 | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      |
 | Xiaomi 17 Pro Max (popsicle) | SM8850 | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` |
 | Xiaomi 15 Pro (haotian)      | SM8750 | `6.6.77-android15-8-gca30f3b4bef6-abogki440974771-4k`  |
 
 启动时按 `uname -r` 精确匹配 offset 表，未匹配的内核会直接拒绝运行；App 顶部会显示「内核支持 / 不支持」。
+
+## Windows 编译
+
+### 环境要求
+
+| 工具          | 版本                                            | 安装方式                                                      |
+|-------------|-----------------------------------------------|-----------------------------------------------------------|
+| JDK         | 17+                                           | 例如 `winget install EclipseAdoptium.Temurin.17.JDK`        |
+| Android SDK | platform 37 + build-tools                     | Android Studio 的 SDK Manager，或 Android command-line tools |
+| Android NDK | r28+（需包含 `aarch64-linux-android35-clang.cmd`） | SDK Manager → "NDK (Side by side)"                        |
+| GNU make    | 3.81+                                         | `winget install GnuWin32.Make`                            |
+| adb（可选）     | 最新                                            | SDK platform-tools                                        |
+
+注意事项：
+
+- GnuWin32 make 会装到 `C:\Program Files (x86)\GnuWin32\bin` —— 装完后**新开一个终端**（或手动加入 `PATH`），`make` 才能被找到。
+- Android SDK 路径通过 `local.properties`（`sdk.dir`）或 `ANDROID_HOME` 环境变量读取。
+- Makefile 会从 `LOCALAPPDATA`/`ANDROID_HOME` 自动检测 NDK，并**优先选用支持目标 API（35）的最新版 NDK**。旧版本（如 r26 只提供到 android-34 的 clang 包装）会被自动跳过；也可以用 `NDK_ROOT` 强制指定版本。
+
+### 编译 APK
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+```
+
+产物：`app\build\outputs\apk\debug\app-debug.apk`
+
+Gradle 构建会先调用 `make` 编译原生二进制，再以 `libghostlock.so`（arm64-v8a）打包进 APK。
+
+### 只编译原生二进制
+
+```powershell
+make ghostlock
+```
+
+产物：项目根目录下的 `ghostlock` —— 运行方式见下文 [命令行调试](#命令行调试)。`make clean` 可删除该二进制。
 
 ## 快速开始
 
