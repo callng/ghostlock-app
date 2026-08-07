@@ -1,5 +1,6 @@
 /ghostlock
 local.properties
+keystore.properties
 .gradle/
 .idea/
 .reasonix/
