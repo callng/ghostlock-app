@@ -35,14 +35,14 @@ SRCS := \
   src/core/root.c
 
 # Headers are inputs too: changing offsets.h/target.h must rebuild.
-HDRS := $(wildcard src/core/*.h) $(wildcard src/devices/*.h) \
-        $(wildcard src/devices/*/offsets.h)
+HDRS := $(wildcard src/core/*.h) $(wildcard src/kernels/*.h) \
+        $(wildcard src/kernels/*/offsets.h)
 
 # Device offsets are selected at runtime from uname -r.
 TARGET_CONFIG ?= target.h
 
 CFLAGS = -O2 -Wall -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function \
-  -Isrc/core -Isrc/devices -DTARGET_CONFIG_H=\"$(TARGET_CONFIG)\"
+  -Isrc/core -Isrc/kernels -DTARGET_CONFIG_H=\"$(TARGET_CONFIG)\"
 LDFLAGS := -fPIE -pie -pthread
 
 .PHONY: all clean product

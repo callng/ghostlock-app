@@ -2,11 +2,24 @@ plugins {
     id 'com.android.application'
 }
 
+def appName = 'GhostLock'
+def appVersionName = '1.0'
+
+def gitVersionCode
+try {
+    def proc = ['git', 'rev-list', '--count', 'HEAD'].execute(null, project.projectDir)
+    proc.waitFor()
+    gitVersionCode = proc.text.trim().toInteger()
+} catch (Exception e) {
+    println "warning: git rev-list failed (${e.message}); versionCode falls back to 1"
+    gitVersionCode = 1
+}
+
 def supportedKernelsSrc = layout.buildDirectory.dir('generated/source/supportedKernels')
 
 tasks.register('generateSupportedKernels') {
     def offsets = fileTree(rootProject.projectDir) {
-        include 'src/devices/*/offsets.h'
+        include 'src/kernels/*/offsets.h'
     }
     def outFile = supportedKernelsSrc.map { it.file('com/ghostlock/app/SupportedKernels.java') }
     inputs.files(offsets)
@@ -22,7 +35,7 @@ tasks.register('generateSupportedKernels') {
         names = names.unique()
         def sb = new StringBuilder()
         sb << "package com.ghostlock.app;\n\n"
-        sb << "/** Generated from device offset headers; do not edit. */\n"
+        sb << "/** Generated from kernel offset headers; do not edit. */\n"
         sb << "public final class SupportedKernels {\n"
         sb << "    public static final String[] UNAMES = {\n"
         names.each { name ->
@@ -48,8 +61,8 @@ android {
         applicationId "com.ghostlock.app"
         minSdk 36
         targetSdk 37
-        versionCode 1
-        versionName "1.0"
+        versionCode gitVersionCode
+        versionName appVersionName
         ndk {
             //noinspection ChromeOsAbiSupport
             abiFilters "arm64-v8a"
@@ -90,4 +103,8 @@ android {
 tasks.named('preBuild') {
     dependsOn(rootProject.tasks.named('prepareGhostlockJniLibs'))
     dependsOn(tasks.named('generateSupportedKernels'))
+}
+
+base {
+    archivesName = "${appName}-v${appVersionName}(${gitVersionCode})"
 }

@@ -1,7 +1,7 @@
 #ifndef RUNTIME_STRUCT_OFFSETS_H
 #define RUNTIME_STRUCT_OFFSETS_H
 
-#include "../devices/offsets.h"
+#include "../kernels/offsets.h"
 
 extern const struct kernel_offsets *active_offsets;
 

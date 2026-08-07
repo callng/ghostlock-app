@@ -15,7 +15,7 @@ OFFSETS_ENTRY(
     .off_anon_pipe_buf_ops = 0x0116e848,
     .off_slide_nfulnl_logger = 0x02112260,
     .off_slide_boot_id = 0x02379ed8,
-    .off_configfs_read_iter = 0x004907ec,
+    .off_configfs_read_iter = 0x004904c8,
     .off_configfs_bin_write_iter = 0x004909f4,
     .off_copy_splice_read = 0x004141bc,
     .off_noop_llseek = 0x003c6f1c,

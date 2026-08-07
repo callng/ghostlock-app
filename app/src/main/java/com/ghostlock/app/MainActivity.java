@@ -71,7 +71,7 @@ public class MainActivity extends Activity {
     private View rootView;
 
     /**
-     * Mirrors the offset tables under src/devices: only these uname builds are supported.
+     * Mirrors the offset tables under src/kernels: only these uname builds are supported.
      */
     private static boolean isKernelSupported() {
         String version = System.getProperty("os.version", "");
