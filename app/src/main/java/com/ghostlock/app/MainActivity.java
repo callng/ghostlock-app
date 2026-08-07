@@ -58,6 +58,10 @@ public class MainActivity extends Activity {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final StringBuilder logBuffer = new StringBuilder();
+    /** How much of logBuffer has already been rendered into logView. */
+    private int logViewSynced;
+    /** False while the window is fully invisible (onStop), e.g. minimized. */
+    private volatile boolean uiVisible;
     private TextView deviceInfo;
     private TextView statusInfo;
     private TextView logView;
@@ -198,6 +202,20 @@ public class MainActivity extends Activity {
 
         runButton.setOnClickListener(v -> startExploit());
         copyButton.setOnClickListener(v -> copyLogs());
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        uiVisible = true;
+        // Catch up on log lines written while the window was not visible.
+        flushPendingLog();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        uiVisible = false;
     }
 
     @Override
@@ -507,15 +525,58 @@ public class MainActivity extends Activity {
         }
         final String msg = line.endsWith("\n") ? line : line + "\n";
         final String plain = stripAnsi(msg);
+        final int bufferEnd;
         synchronized (logBuffer) {
             logBuffer.append(plain);
+            bufferEnd = logBuffer.length();
         }
-        final CharSequence display = colorize(plain);
-        ui.post(() -> {
-            logView.append(display);
-            logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
-        });
         android.util.Log.i(TAG, plain.trim());
+        // Skip view updates while invisible; onStart flushes them in one pass.
+        // Small windows (freeform) stay visible, so their log keeps scrolling.
+        if (uiVisible) {
+            ui.post(() -> appendToView(plain, bufferEnd));
+        }
+    }
+
+    /** Main-thread render of one log line; advances the render cursor. */
+    private void appendToView(String plain, int bufferEnd) {
+        boolean skip;
+        synchronized (logBuffer) {
+            // A flushPendingLog on onStart may already have rendered this line
+            // if the message was posted right before the window went away.
+            skip = bufferEnd <= logViewSynced;
+        }
+        if (skip) {
+            return;
+        }
+        logView.append(colorize(plain));
+        logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
+        synchronized (logBuffer) {
+            if (bufferEnd > logViewSynced) {
+                logViewSynced = bufferEnd;
+            }
+        }
+    }
+
+    /**
+     * Render everything written since the last sync in one pass, so
+     * backgrounding never drops or duplicates log lines.
+     */
+    private void flushPendingLog() {
+        String pending;
+        synchronized (logBuffer) {
+            if (logViewSynced >= logBuffer.length()) {
+                return;
+            }
+            pending = logBuffer.substring(logViewSynced);
+            logViewSynced = logBuffer.length();
+        }
+        for (String line : pending.split("\n")) {
+            if (!line.isEmpty()) {
+                logView.append(colorize(line + "\n"));
+            }
+        }
+        logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
     }
 
     private int dp(int value) {
