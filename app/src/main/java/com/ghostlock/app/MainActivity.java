@@ -201,6 +201,19 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        // Re-arm keep-screen-on if the exploit is still running when we come back.
+        keepScreenOn(running.get());
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        keepScreenOn(false);
+    }
+
+    @Override
     protected void onDestroy() {
         worker.shutdownNow();
         super.onDestroy();
@@ -267,6 +280,7 @@ public class MainActivity extends Activity {
             return;
         }
         setRunState(RunState.RUNNING, getString(R.string.status_running));
+        keepScreenOn(true);
         appendLog("==== start ====");
         worker.execute(() -> {
             int code = 1;
@@ -287,6 +301,8 @@ public class MainActivity extends Activity {
                 int finalCode = code;
                 ui.post(() -> {
                     running.set(false);
+                    // Task finished (exit code shown): screen may dim again.
+                    keepScreenOn(false);
                     if (finalCode == 0) {
                         setRunState(RunState.SUCCESS, getString(R.string.status_success));
                     } else {
@@ -456,6 +472,19 @@ public class MainActivity extends Activity {
                 continue;
             }
             appendLog(line);
+        }
+    }
+
+    /**
+     * Keep the screen on while the exploit is running so the task is never
+     * interrupted by the display timing out. Only effective while this window
+     * is visible, so no permission is needed.
+     */
+    private void keepScreenOn(boolean on) {
+        if (on) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         }
     }
 
