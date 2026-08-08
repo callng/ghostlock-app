@@ -61,7 +61,7 @@ Output: `ghostlock` in the project root — see [Command-Line Debugging](#comman
 
 Open the **GhostLock** app and tap **Run**; the exploit runs automatically.
 
-Install a KernelSU manager first so `ksud` is available: the forked manager (`top.owo233.kernelsu`) is preferred, falling back to the official one (`me.weishu.kernelsu`). Without `ksud`, stages W1/W2 still grant uid 0, but the KernelSU module will not be loaded.
+Install a KernelSU manager first so `ksud` is available: the forked manager (`top.owo233.kernelsu`) is preferred, falling back to the official KernelSU (`me.weishu.kernelsu`) or ReSukiSU (`com.resukisu.resukisu`). Without `ksud`, stages W1/W2 still grant uid 0, but the KernelSU module will not be loaded.
 
 ## Command-Line Debugging
 

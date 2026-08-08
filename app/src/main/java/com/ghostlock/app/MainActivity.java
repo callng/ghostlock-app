@@ -55,6 +55,7 @@ public class MainActivity extends Activity {
     private static final String[] KSUD_PACKAGES = {
             "top.owo233.kernelsu", // forked KernelSU manager (preferred)
             "me.weishu.kernelsu",  // official KernelSU manager
+            "com.resukisu.resukisu", // ReSukiSU manager
     };
     private static final int COLOR_RED = 0xFFFF6B6B;
     private static final int COLOR_GREEN = 0xFF5FD68A;
@@ -392,7 +393,7 @@ public class MainActivity extends Activity {
                 ApplicationInfo appInfo = getPackageManager().getApplicationInfo(pkg, 0);
                 candidates.add(new File(appInfo.nativeLibraryDir, "libksud.so").getAbsolutePath());
             } catch (PackageManager.NameNotFoundException ignored) {
-                appendLog("KernelSU app not installed: " + pkg);
+                appendLog("KernelSU manager not installed: " + pkg);
             }
         }
         candidates.add("/data/local/tmp/ksud");

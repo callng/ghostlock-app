@@ -61,7 +61,7 @@ make ghostlock
 
 打开 **GhostLock** 应用，点击 **执行** ，软件会自动完成提权流程，
 需先自行安装 KernelSU 管理器以使用 `ksud`，优先使用 fork 版（`top.owo233.kernelsu`），
-未安装时回退官方版（`me.weishu.kernelsu`）。
+未安装时回退官方版（`me.weishu.kernelsu`）或 ReSukiSU（`com.resukisu.resukisu`）。
 缺少 `ksud` 时 W1/W2 仍可拿到 uid 0，但不会加载 KernelSU 模块。
 
 ## 命令行调试
