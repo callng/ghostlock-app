@@ -51,6 +51,11 @@ public class MainActivity extends Activity {
     private static final String TAG = "GhostLockApp";
     private static final String BINARY_NAME = "libghostlock.so";
     private static final String KSUD_NAME = "ksud";
+    /** KernelSU manager packages to source libksud.so from, in preference order. */
+    private static final String[] KSUD_PACKAGES = {
+            "top.owo233.kernelsu", // forked KernelSU manager (preferred)
+            "me.weishu.kernelsu",  // official KernelSU manager
+    };
     private static final int COLOR_RED = 0xFFFF6B6B;
     private static final int COLOR_GREEN = 0xFF5FD68A;
     private static final int COLOR_YELLOW = 0xFFFFC94D;
@@ -382,11 +387,13 @@ public class MainActivity extends Activity {
     private File prepareKsud(File workDir) {
         File out = new File(workDir, KSUD_NAME);
         List<String> candidates = new ArrayList<>();
-        try {
-            ApplicationInfo appInfo = getPackageManager().getApplicationInfo("me.weishu.kernelsu", 0);
-            candidates.add(new File(appInfo.nativeLibraryDir, "libksud.so").getAbsolutePath());
-        } catch (PackageManager.NameNotFoundException ignored) {
-            appendLog("KernelSU app not installed");
+        for (String pkg : KSUD_PACKAGES) {
+            try {
+                ApplicationInfo appInfo = getPackageManager().getApplicationInfo(pkg, 0);
+                candidates.add(new File(appInfo.nativeLibraryDir, "libksud.so").getAbsolutePath());
+            } catch (PackageManager.NameNotFoundException ignored) {
+                appendLog("KernelSU app not installed: " + pkg);
+            }
         }
         candidates.add("/data/local/tmp/ksud");
         candidates.add("/data/adb/ksu/bin/ksud");
