@@ -116,6 +116,32 @@
             android:maxLines="2"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_card"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="12dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/cpu_pair_label"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
+        <Spinner
+            android:id="@+id/cpuSpinner"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:background="@drawable/bg_spinner" />
     </LinearLayout>
 
     <Button

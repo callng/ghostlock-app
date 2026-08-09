@@ -23,9 +23,12 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -40,8 +43,11 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -51,6 +57,8 @@ public class MainActivity extends Activity {
     private static final String TAG = "GhostLockApp";
     private static final String BINARY_NAME = "libghostlock.so";
     private static final String KSUD_NAME = "ksud";
+    private static final String PREFS = "ghostlock_prefs";
+    private static final String PREF_CPU_PAIR = "cpu_pair";
     /** KernelSU manager packages to source libksud.so from, in preference order. */
     private static final String[] KSUD_PACKAGES = {
             "top.owo233.kernelsu", // forked KernelSU manager (preferred)
@@ -75,10 +83,14 @@ public class MainActivity extends Activity {
     private View statusChip;
     private LinearLayout kernelChip;
     private TextView kernelChipText;
+    private Spinner cpuSpinner;
     private ScrollView logScroll;
     private Button runButton;
     private Button copyButton;
     private View rootView;
+    private final List<int[]> cpuPairs = new ArrayList<>();
+    private final List<String> cpuPairLabels = new ArrayList<>();
+    private int cpuPairIndex;
 
     /**
      * Mirrors the offset tables under src/kernels: only these uname builds are supported.
@@ -119,6 +131,112 @@ public class MainActivity extends Activity {
             return value instanceof String ? (String) value : "";
         } catch (Throwable ignored) {
             return "";
+        }
+    }
+
+    private static String readSysFile(String path) {
+        File f = new File(path);
+        if (!f.isFile()) {
+            return "";
+        }
+        try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+            String line = r.readLine();
+            return line == null ? "" : line.trim();
+        } catch (IOException ignored) {
+            return "";
+        }
+    }
+
+    private static List<Integer> parseCpuList(String s) {
+        List<Integer> out = new ArrayList<>();
+        if (s == null || s.isEmpty()) {
+            return out;
+        }
+        for (String part : s.split(",")) {
+            String[] range = part.split("-");
+            try {
+                int lo = Integer.parseInt(range[0].trim());
+                int hi = range.length > 1 ? Integer.parseInt(range[1].trim()) : lo;
+                for (int cpu = lo; cpu <= hi; cpu++) {
+                    out.add(cpu);
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return out;
+    }
+
+    private static long readMaxFreq(int cpu) {
+        String v = readSysFile("/sys/devices/system/cpu/cpu" + cpu + "/cpufreq/cpuinfo_max_freq");
+        if (v.isEmpty()) {
+            return -1;
+        }
+        try {
+            return Long.parseLong(v);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static String formatFreq(long khz) {
+        if (khz >= 1_000_000L) {
+            return String.format(Locale.ROOT, "%.2f GHz", khz / 1_000_000.0);
+        }
+        return String.format(Locale.ROOT, "%.0f MHz", khz / 1000.0);
+    }
+
+    private void buildCpuPairs() {
+        cpuPairs.clear();
+        cpuPairLabels.clear();
+        cpuPairs.add(new int[]{0, 1});
+        long autoFreq = readMaxFreq(0);
+        cpuPairLabels.add(getString(R.string.cpu_pair_auto) + (autoFreq > 0 ? " · " + formatFreq(autoFreq) : ""));
+
+        List<Integer> online = parseCpuList(readSysFile("/sys/devices/system/cpu/online"));
+        if (online.isEmpty()) {
+            return;
+        }
+        Map<Long, List<Integer>> byFreq = new TreeMap<>(Collections.reverseOrder());
+        for (int cpu : online) {
+            long freq = readMaxFreq(cpu);
+            if (freq > 0) {
+                byFreq.computeIfAbsent(freq, k -> new ArrayList<>()).add(cpu);
+            }
+        }
+        for (Map.Entry<Long, List<Integer>> entry : byFreq.entrySet()) {
+            List<Integer> cluster = entry.getValue();
+            Collections.sort(cluster);
+            String freqText = " · " + formatFreq(entry.getKey());
+            for (int i = 0; i + 1 < cluster.size(); i += 2) {
+                int main = cluster.get(i);
+                int consumer = cluster.get(i + 1);
+                cpuPairs.add(new int[]{main, consumer});
+                cpuPairLabels.add(main + "," + consumer + freqText);
+            }
+        }
+    }
+
+    private void restoreCpuPair() {
+        cpuPairIndex = 0;
+        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_CPU_PAIR, "auto");
+        if (saved == null || saved.equals("auto")) {
+            return;
+        }
+        String[] parts = saved.split(",");
+        if (parts.length != 2) {
+            return;
+        }
+        try {
+            int main = Integer.parseInt(parts[0].trim());
+            int consumer = Integer.parseInt(parts[1].trim());
+            for (int i = 0; i < cpuPairs.size(); i++) {
+                int[] pair = cpuPairs.get(i);
+                if (pair[0] == main && pair[1] == consumer) {
+                    cpuPairIndex = i;
+                    return;
+                }
+            }
+        } catch (NumberFormatException ignored) {
         }
     }
 
@@ -200,14 +318,36 @@ public class MainActivity extends Activity {
         copyButton = findViewById(R.id.copyButton);
         kernelChip = findViewById(R.id.kernelChip);
         kernelChipText = findViewById(R.id.kernelChipText);
+        cpuSpinner = findViewById(R.id.cpuSpinner);
 
         applyWindowInsetsPadding();
         deviceInfo.setText(buildDeviceSummary());
+        buildCpuPairs();
+        restoreCpuPair();
         applyKernelStatus();
         setRunState(RunState.IDLE, getString(R.string.status_idle));
 
         runButton.setOnClickListener(v -> startExploit());
         copyButton.setOnClickListener(v -> copyLogs());
+
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, R.layout.spinner_item_right, cpuPairLabels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        cpuSpinner.setAdapter(adapter);
+        cpuSpinner.setSelection(cpuPairIndex);
+        cpuSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                cpuPairIndex = position;
+                int[] pair = cpuPairs.get(position);
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString(PREF_CPU_PAIR, position == 0 ? "auto" : pair[0] + "," + pair[1])
+                        .apply();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
     }
 
     @Override
@@ -306,6 +446,7 @@ public class MainActivity extends Activity {
         setRunState(RunState.RUNNING, getString(R.string.status_running));
         keepScreenOn(true);
         appendLog("==== start ====");
+        appendLog("cpu pair: " + cpuPairLabels.get(cpuPairIndex));
         worker.execute(() -> {
             int code = 1;
             try {
@@ -428,6 +569,11 @@ public class MainActivity extends Activity {
         pb.environment().put("GHOSTLOCK_HOME", workDir.getAbsolutePath());
         pb.environment().put("TMPDIR", workDir.getAbsolutePath());
         pb.environment().put("HOME", workDir.getAbsolutePath());
+        if (cpuPairIndex != 0) {
+            int[] pair = cpuPairs.get(cpuPairIndex);
+            pb.environment().put("GHOSTLOCK_CORE", String.valueOf(pair[0]));
+            pb.environment().put("GHOSTLOCK_CONSUMER_CORE", String.valueOf(pair[1]));
+        }
 
         Process process = pb.start();
         Thread reader = new Thread(() -> {

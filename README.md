@@ -17,7 +17,9 @@
 | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      | OPPO Find X8 / Find X8 Pro (MT6991)            |
 | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` | Redmi K90 Pro Max (SM8850)                     |
 | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` | Xiaomi 17 / 17 Pro / 17 Pro Max (SM8850)       |
+| `6.12.23-android16-5-g82efd98459a2-ab14457512-4k`      | OPPO Find X9 / Find X9 Pro (MT6993)            |
 | `6.12.23-android16-5-gb2a876903b49-ab14541642-4k`      | OnePlus 15 (SM8850)                            |
+| `6.12.38-android16-5-g844001fb8721-ab14552068-4k`      | OnePlus 15T (SM8850)                           |
 
 At startup the kernel is matched via `uname -r`; unsupported kernels are rejected immediately and the app shows the status at the top. Tables live under `src/kernels/` keyed by the exact `uname -r`, so devices on the same build share one row — Redmi K90 & Xiaomi Civi 5 Pro, and Xiaomi 17 / 17 Pro / 17 Pro Max. To add a device on a listed kernel, append it to that row (the extractor's `--register` reports the kernel as shared instead of duplicating it); a new kernel build gets a new row.
 
@@ -62,6 +64,10 @@ Output: `ghostlock` in the project root — see [Command-Line Debugging](#comman
 Open the **GhostLock** app and tap **Run**; the exploit runs automatically.
 
 Install a KernelSU manager first so `ksud` is available: the forked manager (`top.owo233.kernelsu`) is preferred, falling back to the official KernelSU (`me.weishu.kernelsu`) or ReSukiSU (`com.resukisu.resukisu`). Without `ksud`, stages W1/W2 still grant uid 0, but the KernelSU module will not be loaded.
+
+### CPU core pair
+
+The route is a two-core race: the main thread hammers pselect pinned to `CORE` while a consumer thread perturbs the same waiter's priority on `CONSUMER_CORE` (defaults 0/1). The **CPU cores** option in the app groups online CPUs by max frequency and offers adjacent pairs (big/mid/little clusters); the choice is passed to native via `GHOSTLOCK_CORE`/`GHOSTLOCK_CONSUMER_CORE`. For shell runs: `GHOSTLOCK_CORE=6 GHOSTLOCK_CONSUMER_CORE=7 ./ghostlock`. Requested cores outside the current cpuset are rejected with a fallback to 0/1 and a warning.
 
 ## Command-Line Debugging
 

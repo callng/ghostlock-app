@@ -52,7 +52,10 @@
 #define MM_STRUCT_SZ 0x500
 #define MM_ORDER 3
 #define MM_PARTIALS 5
-#define CORE 0
+extern int g_core_main;
+extern int g_core_consumer;
+#define CORE (g_core_main)
+#define CONSUMER_CORE (g_core_consumer)
 #define KSNITCH_COLLISIONS 4
 
 #define ORDER3_SIZE (PAGE_SIZE << MM_ORDER)
@@ -141,7 +144,6 @@
 #define P0_DATA_ALIAS_CONST(image_addr) \
   (P0_PAGE_OFFSET | ((image_addr) - KIMAGE_TEXT_BASE + P0_KERNEL_PHYS_DELTA))
 
-#define CONSUMER_CORE (CORE + 1)
 #define CONSUMER_MAX_CALLS 1
 #define PSELECT_ROUTE_NFDS 320
 #define PSELECT_CONSUMER_NICE 19
@@ -371,6 +373,7 @@ int run_exploit(int argc, char **argv);
 int should_stop_cred_write(void);
 void read_first_line(const char *path, char *buf, size_t len);
 void log_startup_context(void);
+void init_cpu_config(void);
 void log_slide_child_context(void);
 void disable_rseq_for_thread(void);
 void init_p0_profile(void);

@@ -17,7 +17,9 @@
 | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      | OPPO Find X8 / Find X8 Pro (MT6991)            |
 | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` | Redmi K90 Pro Max (SM8850)                     |
 | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` | Xiaomi 17 / 17 Pro / 17 Pro Max (SM8850)       |
+| `6.12.23-android16-5-g82efd98459a2-ab14457512-4k`      | OPPO Find X9 / Find X9 Pro (MT6993)            |
 | `6.12.23-android16-5-gb2a876903b49-ab14541642-4k`      | OnePlus 15 (SM8850)                            |
+| `6.12.38-android16-5-g844001fb8721-ab14552068-4k`      | OnePlus 15T (SM8850)                           |
 
 启动时按 `uname -r` 匹配偏移表，未匹配的内核会直接拒绝运行，App 顶部显示支持状态。偏移表按精确的 `uname -r` 组织在 `src/kernels/` 下，同一构建的设备共用一行——例如 Redmi K90 与 Xiaomi Civi 5 Pro，以及 Xiaomi 17 / 17 Pro / 17 Pro Max。新增跑在已列内核上的设备时，在对应行追加设备名即可（提取器的 `--register` 会提示共用该内核，不会重复建表）；全新内核构建则新增一行。
 
@@ -63,6 +65,10 @@ make ghostlock
 需先自行安装 KernelSU 管理器以使用 `ksud`，优先使用 fork 版（`top.owo233.kernelsu`），
 未安装时回退官方版（`me.weishu.kernelsu`）或 ReSukiSU（`com.resukisu.resukisu`）。
 缺少 `ksud` 时 W1/W2 仍可拿到 uid 0，但不会加载 KernelSU 模块。
+
+### CPU 核心对
+
+提权路线是双核竞争：主线程钉在 `CORE` 上跑 pselect 爆破，consumer 线程钉在 `CONSUMER_CORE` 上扰动同一 waiter 的优先级，默认 0/1。App 内的 **CPU 核心对** 选项会按频率自动分簇列出可选的相邻核心对（大核/中核/小核），选择后通过 `GHOSTLOCK_CORE`/`GHOSTLOCK_CONSUMER_CORE` 传给 native；命令行调试可用 `GHOSTLOCK_CORE=6 GHOSTLOCK_CONSUMER_CORE=7 ./ghostlock` 指定。请求的核心不在当前 cpuset 内时会自动回退到 0/1 并告警。
 
 ## 命令行调试
 

