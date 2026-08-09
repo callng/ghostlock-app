@@ -76,6 +76,8 @@ public class MainActivity extends Activity {
     private int logViewSynced;
     /** False while the window is fully invisible (onStop), e.g. minimized. */
     private volatile boolean uiVisible;
+    private final List<int[]> cpuPairs = new ArrayList<>();
+    private final List<String> cpuPairLabels = new ArrayList<>();
     private TextView deviceInfo;
     private TextView statusInfo;
     private TextView logView;
@@ -88,8 +90,6 @@ public class MainActivity extends Activity {
     private Button runButton;
     private Button copyButton;
     private View rootView;
-    private final List<int[]> cpuPairs = new ArrayList<>();
-    private final List<String> cpuPairLabels = new ArrayList<>();
     private int cpuPairIndex;
 
     /**
@@ -185,61 +185,6 @@ public class MainActivity extends Activity {
         return String.format(Locale.ROOT, "%.0f MHz", khz / 1000.0);
     }
 
-    private void buildCpuPairs() {
-        cpuPairs.clear();
-        cpuPairLabels.clear();
-        cpuPairs.add(new int[]{0, 1});
-        long autoFreq = readMaxFreq(0);
-        cpuPairLabels.add(getString(R.string.cpu_pair_auto) + (autoFreq > 0 ? " · " + formatFreq(autoFreq) : ""));
-
-        List<Integer> online = parseCpuList(readSysFile("/sys/devices/system/cpu/online"));
-        if (online.isEmpty()) {
-            return;
-        }
-        Map<Long, List<Integer>> byFreq = new TreeMap<>(Collections.reverseOrder());
-        for (int cpu : online) {
-            long freq = readMaxFreq(cpu);
-            if (freq > 0) {
-                byFreq.computeIfAbsent(freq, k -> new ArrayList<>()).add(cpu);
-            }
-        }
-        for (Map.Entry<Long, List<Integer>> entry : byFreq.entrySet()) {
-            List<Integer> cluster = entry.getValue();
-            Collections.sort(cluster);
-            String freqText = " · " + formatFreq(entry.getKey());
-            for (int i = 0; i + 1 < cluster.size(); i += 2) {
-                int main = cluster.get(i);
-                int consumer = cluster.get(i + 1);
-                cpuPairs.add(new int[]{main, consumer});
-                cpuPairLabels.add(main + "," + consumer + freqText);
-            }
-        }
-    }
-
-    private void restoreCpuPair() {
-        cpuPairIndex = 0;
-        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_CPU_PAIR, "auto");
-        if (saved == null || saved.equals("auto")) {
-            return;
-        }
-        String[] parts = saved.split(",");
-        if (parts.length != 2) {
-            return;
-        }
-        try {
-            int main = Integer.parseInt(parts[0].trim());
-            int consumer = Integer.parseInt(parts[1].trim());
-            for (int i = 0; i < cpuPairs.size(); i++) {
-                int[] pair = cpuPairs.get(i);
-                if (pair[0] == main && pair[1] == consumer) {
-                    cpuPairIndex = i;
-                    return;
-                }
-            }
-        } catch (NumberFormatException ignored) {
-        }
-    }
-
     /**
      * Color a whole log line by its leading marker. The native binary only
      * colors the "[..]" prefix (message text stays default) and the script log
@@ -299,6 +244,61 @@ public class MainActivity extends Activity {
             }
         }
         return null;
+    }
+
+    private void buildCpuPairs() {
+        cpuPairs.clear();
+        cpuPairLabels.clear();
+        cpuPairs.add(new int[]{0, 1});
+        long autoFreq = readMaxFreq(0);
+        cpuPairLabels.add(getString(R.string.cpu_pair_auto) + (autoFreq > 0 ? " · " + formatFreq(autoFreq) : ""));
+
+        List<Integer> online = parseCpuList(readSysFile("/sys/devices/system/cpu/online"));
+        if (online.isEmpty()) {
+            return;
+        }
+        Map<Long, List<Integer>> byFreq = new TreeMap<>(Collections.reverseOrder());
+        for (int cpu : online) {
+            long freq = readMaxFreq(cpu);
+            if (freq > 0) {
+                byFreq.computeIfAbsent(freq, k -> new ArrayList<>()).add(cpu);
+            }
+        }
+        for (Map.Entry<Long, List<Integer>> entry : byFreq.entrySet()) {
+            List<Integer> cluster = entry.getValue();
+            Collections.sort(cluster);
+            String freqText = " · " + formatFreq(entry.getKey());
+            for (int i = 0; i + 1 < cluster.size(); i += 2) {
+                int main = cluster.get(i);
+                int consumer = cluster.get(i + 1);
+                cpuPairs.add(new int[]{main, consumer});
+                cpuPairLabels.add(main + "," + consumer + freqText);
+            }
+        }
+    }
+
+    private void restoreCpuPair() {
+        cpuPairIndex = 0;
+        String saved = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_CPU_PAIR, "auto");
+        if (saved.equals("auto")) {
+            return;
+        }
+        String[] parts = saved.split(",");
+        if (parts.length != 2) {
+            return;
+        }
+        try {
+            int main = Integer.parseInt(parts[0].trim());
+            int consumer = Integer.parseInt(parts[1].trim());
+            for (int i = 0; i < cpuPairs.size(); i++) {
+                int[] pair = cpuPairs.get(i);
+                if (pair[0] == main && pair[1] == consumer) {
+                    cpuPairIndex = i;
+                    return;
+                }
+            }
+        } catch (NumberFormatException ignored) {
+        }
     }
 
     @Override

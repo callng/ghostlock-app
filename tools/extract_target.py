@@ -161,9 +161,10 @@ def recover_kernel_phys_load(path: Path) -> int:
 LZ4_LEGACY_MAGIC = b"\x02\x21\x4c\x18"
 LZ4_MAX_IMAGE = 0x10000000  # 256 MiB upper bound for a decompressed arm64 Image
 
-# MediaTek loads the kernel at the DRAM base (arm64 text_offset=0); DRAM
-# starts at 0x80000000 on its current flagship platforms, so this is the
-# assumed load address when neither xbl_config nor --phys is available.
+# _text VA encodes the MTK DRAM base (text_offset=0); derive
+# kernel_phys_load from kallsyms as _text - MTK_VADDR_BASE.
+# MTK_DEFAULT_PHYS_LOAD is only a fallback when _text is unavailable.
+MTK_VADDR_BASE = 0xFFFFFFC000000000
 MTK_DEFAULT_PHYS_LOAD = 0x80000000
 
 
@@ -1525,15 +1526,8 @@ def main(argv: list[str] | None = None) -> int:
             args.kernel_phys_load = recover_kernel_phys_load(args.xbl_config)
         elif args.phys is not None:
             args.kernel_phys_load = args.phys
-        elif boot.mtk_lz4:
-            args.kernel_phys_load = MTK_DEFAULT_PHYS_LOAD
-            print(
-                "info: MediaTek LZ4 image; assuming kernel_phys_load="
-                f"0x{MTK_DEFAULT_PHYS_LOAD:x} (DRAM base; pass --phys to "
-                "override)",
-                file=sys.stderr,
-            )
         else:
+            # No XBL memory map on MTK; derive phys from _text below.
             args.kernel_phys_load = None
         btf_raw = boot.embedded_btf()
         btf = Btf(btf_raw) if btf_raw is not None else None
@@ -1551,9 +1545,37 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             if owned_kallsyms:
                 kallsyms_path.unlink(missing_ok=True)
-        base = unique(symbols, "_text") or unique(symbols, "_head")
+        text_base = unique(symbols, "_text")
+        base = text_base or unique(symbols, "_head")
         if base is None:
             raise ExtractError("_text/_head is not unique in kallsyms")
+        if args.kernel_phys_load is None and boot.mtk_lz4:
+            if text_base is not None:
+                args.kernel_phys_load = text_base - MTK_VADDR_BASE
+                if 0 < args.kernel_phys_load <= 0xFFFFFFFF:
+                    print(
+                        "info: MediaTek LZ4 image; kernel_phys_load derived "
+                        f"from _text: 0x{args.kernel_phys_load:x} (DRAM base; "
+                        "pass --phys to override)",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        "warning: derived MediaTek kernel_phys_load="
+                        f"0x{args.kernel_phys_load:x} is implausible; using "
+                        f"0x{MTK_DEFAULT_PHYS_LOAD:x} (pass --phys to "
+                        "override)",
+                        file=sys.stderr,
+                    )
+                    args.kernel_phys_load = MTK_DEFAULT_PHYS_LOAD
+            else:
+                args.kernel_phys_load = MTK_DEFAULT_PHYS_LOAD
+                print(
+                    "info: MediaTek LZ4 image; _text unavailable, assuming "
+                    f"kernel_phys_load=0x{MTK_DEFAULT_PHYS_LOAD:x} (DRAM "
+                    "base; pass --phys to override)",
+                    file=sys.stderr,
+                )
         symbol_offsets = resolve_symbols(
             symbols, types, btf, base, boot.release()
         )
@@ -1715,8 +1737,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.register:
             release = boot.release()
             key = kernel_key(release)
-            if release in existing_entries():
-                # Same kernel already registered: keep one table.
+            if release in existing_entries() and not args.force:
+                # Same kernel already registered: keep one table unless --force.
                 warn_existing_mismatches(release, symbol_offsets)
                 if kernel_header_path(key).exists():
                     print(

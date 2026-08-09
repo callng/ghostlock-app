@@ -20,8 +20,8 @@ OFFSETS_ENTRY(
     .off_copy_splice_read = 0x004141bc,
     .off_noop_llseek = 0x003c6f1c,
     .off_slide_loggers_0_1 = 0x021121b8,
-    .off_ashmem_misc_fops = 0x0227c528,
     .off_ashmem_fops = 0x012ef5c0,
+    .off_ashmem_misc_fops = 0x0227c528,
     .off_ashmem_ioctl = 0x00c8bc70,
     .off_ashmem_compat_ioctl = 0x00c8c32c,
     .off_ashmem_mmap = 0x00c8c380,
@@ -29,10 +29,3 @@ OFFSETS_ENTRY(
     .off_ashmem_release = 0x00c8c628,
     .off_ashmem_show_fdinfo = 0x00c8c6b4,
 ),
-
-/* BTF reference (runtime uses target.h defaults): */
-/* #define STRUCT_PAGE_SIZE 0x40 */
-/* #define STRUCT_PAGE_COMPOUND_HEAD 0x8 */
-/* #define STRUCT_PAGE_TYPE 0x30 */
-/* #define STRUCT_SLAB_CACHE 0x8 */
-/* #define STRUCT_MM_STRUCT 0x4C0 */
