@@ -11,10 +11,43 @@
 #include <sys/mman.h>
 #include <linux/perf_event.h>
 #include <sys/socket.h>
+#include <sys/system_properties.h>
 #include <sys/utsname.h>
+#include <strings.h>
 #include <poll.h>
 
 const struct kernel_offsets *active_offsets = NULL;
+
+/* MTK loads the kernel at the DRAM base (text_offset=0), Qualcomm via the
+ * bootloader; the same uname -r can serve both families, so detect at
+ * runtime.  W1 has no root and /proc is SELinux-blocked: read SoC
+ * properties (shared area, no permission needed). */
+static int soc_is_mtk(void) {
+  char buf[256];
+  if (__system_property_get("ro.soc.manufacturer", buf) > 0) {
+    if (strncasecmp(buf, "mediatek", 8) == 0 ||
+        strncasecmp(buf, "mtk", 3) == 0) {
+      return 1;
+    }
+    if (strncasecmp(buf, "qti", 3) == 0 ||
+        strncasecmp(buf, "qualcomm", 8) == 0) {
+      return 0;
+    }
+  }
+  const char *keys[] = {"ro.soc.model", "ro.board.platform", NULL};
+  for (int i = 0; keys[i]; i++) {
+    if (__system_property_get(keys[i], buf) <= 0 || !buf[0]) {
+      continue;
+    }
+    if (strncasecmp(buf, "mt", 2) == 0) {
+      return 1;
+    }
+    if (strncasecmp(buf, "sm", 2) == 0 || strncasecmp(buf, "qcom", 4) == 0) {
+      return 0;
+    }
+  }
+  return 0;
+}
 
 /* Override target.h _OFF macros with dynamic offsets from offsets.h table */
 #undef SELINUX_ENFORCING_OFF
@@ -87,9 +120,18 @@ static int select_offsets(void) {
       pr_success("offsets matched: %s\n", active_offsets->uname_r);
       /* Publish the selected entry's init_cred image address. */
       g_init_cred_image = INIT_CRED;
+      /* STRUCT_OFFSETS_6_6/6_12 carry the version-selected Qualcomm default;
+       * MTK always loads at the DRAM base (text_offset=0). */
       if (active_offsets->kernel_phys_load) {
         p0_kernel_phys_load = active_offsets->kernel_phys_load;
       }
+      int mtk = soc_is_mtk();
+      if (mtk) {
+        p0_kernel_phys_load = KIMAGE_TEXT_BASE - MTK_VADDR_BASE;
+      }
+      pr_info("soc: %s; kernel_phys_load=0x%llx\n",
+              mtk ? "mtk" : "qcom/other",
+              (unsigned long long)p0_kernel_phys_load);
       pr_info("init_cred image=%016zx alias=%016zx\n",
               (size_t)g_init_cred_image, (size_t)data_addr(g_init_cred_image));
       return 0;

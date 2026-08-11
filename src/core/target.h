@@ -5,6 +5,7 @@
 
 /* Kernel address layout. */
 #define KIMAGE_TEXT_BASE 0xffffffc080000000ULL
+#define MTK_VADDR_BASE 0xffffffc000000000ULL
 #define P0_PAGE_OFFSET 0xffffff8000000000ULL
 #define P0_PHYS_OFFSET 0x80000000ULL
 #define P0_KERNEL_PHYS_LOAD 0xa8000000ULL

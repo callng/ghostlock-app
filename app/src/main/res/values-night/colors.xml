@@ -9,10 +9,6 @@
     <color name="accent_disabled">#FF1E3A5F</color>
     <color name="border">#FF2A323C</color>
     <color name="divider">#FF232B33</color>
-    <color name="status_idle">#FF9CA3AF</color>
-    <color name="status_idle_bg">#FF232B33</color>
-    <color name="status_running">#FFF5A623</color>
-    <color name="status_running_bg">#FF3B2E0F</color>
     <color name="status_success">#FF34D399</color>
     <color name="status_success_bg">#FF0F3D2E</color>
     <color name="status_error">#FFF87171</color>
