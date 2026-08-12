@@ -11,12 +11,7 @@ struct kernel_offsets {
   int pselect_waiter_shift;
   uint64_t off_init_task, off_init_cred;
   uint64_t off_root_task_group, off_selinux_enforcing;
-  uint64_t off_selinux_blob_sizes, off_security_hook_heads, off_kmalloc_caches;
-  uint64_t off_anon_pipe_buf_ops, off_ashmem_misc_fops, off_ashmem_fops;
-  uint64_t off_ashmem_ioctl, off_ashmem_compat_ioctl, off_ashmem_mmap;
-  uint64_t off_ashmem_open, off_ashmem_release, off_ashmem_show_fdinfo;
-  uint64_t off_configfs_read_iter, off_configfs_bin_write_iter;
-  uint64_t off_copy_splice_read, off_noop_llseek;
+  uint64_t off_selinux_blob_sizes, off_security_hook_heads;
   uint64_t off_slide_nfulnl_logger, off_slide_loggers_0_1, off_slide_boot_id;
 
   /* Per-kernel struct offsets; 0 uses target.h defaults. */
@@ -51,8 +46,6 @@ static const struct kernel_offsets known_offsets[] = {
 #include "6.6.77-android15-8-g4a507830d890-ab13636293-4k/offsets.h"
 #include "6.6.77-android15-8-g63ce7556864c-ab13994517-4k/offsets.h"
 #include "6.6.77-android15-8-gca30f3b4bef6-abogki440974771-4k/offsets.h"
-#include "6.6.89-android15-8-g5a0ffb447c1d-ab13771415-4k/offsets.h"
-#include "6.6.89-android15-8-g8e4be6b47e40-ab14134548-4k/offsets.h"
 #include "6.6.89-android15-8-g096cdb6ecefc-ab14358676-4k/offsets.h"
 #include "6.6.89-android15-8-gf4dc45704e54-abogki446052083-4k/offsets.h"
 #include "6.6.102-android15-8-gb01b41c2647c-ab15574720-4k/offsets.h"

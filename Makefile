@@ -28,11 +28,9 @@ endif
 
 SRCS := \
   src/core/main.c \
+  src/core/offsets_json.c \
   src/core/util.c \
-  src/core/slide.c \
-  src/core/fops.c \
-  src/core/pipe.c \
-  src/core/root.c
+  src/core/fops.c
 
 # Headers are inputs too: changing offsets.h/target.h must rebuild.
 HDRS := $(wildcard src/core/*.h) $(wildcard src/kernels/*.h) \
@@ -41,9 +39,9 @@ HDRS := $(wildcard src/core/*.h) $(wildcard src/kernels/*.h) \
 # Device offsets are selected at runtime from uname -r.
 TARGET_CONFIG ?= target.h
 
-CFLAGS = -O2 -Wall -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function \
+CFLAGS = -O2 -flto -Wall -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function \
   -Isrc/core -Isrc/kernels -DTARGET_CONFIG_H=\"$(TARGET_CONFIG)\"
-LDFLAGS := -fPIE -pie -pthread
+LDFLAGS := -fPIE -pie -pthread -flto
 
 .PHONY: all clean product
 

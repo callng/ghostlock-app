@@ -17,6 +17,4 @@
     <color name="log_border">#FF3A4552</color>
     <color name="log_text">#FFD1D5DB</color>
     <color name="log_title">#FF9CA3AF</color>
-    <color name="status_bar">#FF0E1319</color>
-    <color name="nav_bar">#FF0E1319</color>
 </resources>

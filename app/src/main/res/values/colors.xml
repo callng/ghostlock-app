@@ -18,6 +18,5 @@
     <color name="log_divider">#33FFFFFF</color>
     <color name="log_text">#FFD1D5DB</color>
     <color name="log_title">#FF9CA3AF</color>
-    <color name="status_bar">#FFF7F8FA</color>
-    <color name="nav_bar">#FFF7F8FA</color>
+    <color name="launcher_icon_background">#FFF1F3F5</color>
 </resources>

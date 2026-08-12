@@ -1,2 +1,0 @@
-lz4>=4.0
-vmlinux-to-elf>=1.3.6

@@ -17,20 +17,6 @@ extern const struct kernel_offsets *active_offsets;
 #undef SELINUX_ENFORCING
 #undef SELINUX_BLOB_SIZES
 #undef SECURITY_HOOK_HEADS
-#undef KMALLOC_CACHES
-#undef ANON_PIPE_BUF_OPS
-#undef ASHMEM_MISC_FOPS
-#undef ASHMEM_FOPS
-#undef ASHMEM_IOCTL
-#undef ASHMEM_COMPAT_IOCTL
-#undef ASHMEM_MMAP
-#undef ASHMEM_OPEN
-#undef ASHMEM_RELEASE
-#undef ASHMEM_SHOW_FDINFO
-#undef CONFIGFS_READ_ITER
-#undef CONFIGFS_BIN_WRITE_ITER
-#undef COPY_SPLICE_READ
-#undef NOOP_LLSEEK
 #undef SLIDE_NFULNL_LOGGER_IMAGE
 #undef SLIDE_LOGGERS_0_1_IMAGE
 #undef SLIDE_RANDOM_BOOT_ID_DATA_IMAGE
@@ -44,20 +30,6 @@ extern const struct kernel_offsets *active_offsets;
 #define SELINUX_ENFORCING   _RSO_IMAGE(off_selinux_enforcing, SELINUX_ENFORCING_OFF)
 #define SELINUX_BLOB_SIZES  _RSO_IMAGE(off_selinux_blob_sizes, SELINUX_BLOB_SIZES_OFF)
 #define SECURITY_HOOK_HEADS _RSO_IMAGE(off_security_hook_heads, SECURITY_HOOK_HEADS_OFF)
-#define KMALLOC_CACHES      _RSO_IMAGE(off_kmalloc_caches, KMALLOC_CACHES_OFF)
-#define ANON_PIPE_BUF_OPS   _RSO_IMAGE(off_anon_pipe_buf_ops, ANON_PIPE_BUF_OPS_OFF)
-#define ASHMEM_MISC_FOPS    _RSO_IMAGE(off_ashmem_misc_fops, ASHMEM_MISC_FOPS_OFF)
-#define ASHMEM_FOPS         _RSO_IMAGE(off_ashmem_fops, ASHMEM_FOPS_OFF)
-#define ASHMEM_IOCTL        _RSO_IMAGE(off_ashmem_ioctl, ASHMEM_IOCTL_OFF)
-#define ASHMEM_COMPAT_IOCTL _RSO_IMAGE(off_ashmem_compat_ioctl, ASHMEM_COMPAT_IOCTL_OFF)
-#define ASHMEM_MMAP         _RSO_IMAGE(off_ashmem_mmap, ASHMEM_MMAP_OFF)
-#define ASHMEM_OPEN         _RSO_IMAGE(off_ashmem_open, ASHMEM_OPEN_OFF)
-#define ASHMEM_RELEASE      _RSO_IMAGE(off_ashmem_release, ASHMEM_RELEASE_OFF)
-#define ASHMEM_SHOW_FDINFO  _RSO_IMAGE(off_ashmem_show_fdinfo, ASHMEM_SHOW_FDINFO_OFF)
-#define CONFIGFS_READ_ITER      _RSO_IMAGE(off_configfs_read_iter, CONFIGFS_READ_ITER_OFF)
-#define CONFIGFS_BIN_WRITE_ITER _RSO_IMAGE(off_configfs_bin_write_iter, CONFIGFS_BIN_WRITE_ITER_OFF)
-#define COPY_SPLICE_READ    _RSO_IMAGE(off_copy_splice_read, COPY_SPLICE_READ_OFF)
-#define NOOP_LLSEEK         _RSO_IMAGE(off_noop_llseek, NOOP_LLSEEK_OFF)
 
 #define SLIDE_NFULNL_LOGGER_IMAGE \
   _RSO_IMAGE(off_slide_nfulnl_logger, SLIDE_NFULNL_LOGGER_OFF)
@@ -70,11 +42,6 @@ extern const struct kernel_offsets *active_offsets;
   _RSO_IMAGE(off_root_task_group, ROOT_TASK_GROUP_OFF)
 #define SLIDE_SYSCTL_BOOTID_IMAGE \
   _RSO_IMAGE(off_slide_boot_id, SLIDE_SYSCTL_BOOTID_OFF)
-
-#undef INIT_TASK_TASKS
-#undef SECURITY_CAPABLE_HEAD
-#define INIT_TASK_TASKS (INIT_TASK + TASK_TASKS_OFF)
-#define SECURITY_CAPABLE_HEAD (SECURITY_HOOK_HEADS + 0x40)
 
 #undef FAKE_TASK_PRIO_OFF
 #undef FAKE_TASK_NORMAL_PRIO_OFF
