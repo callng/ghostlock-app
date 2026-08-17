@@ -18,6 +18,7 @@ ifeq ($(OS),Windows_NT)
   # pick the newest such NDK (NDK directory names sort by version).
   NDK_WITH_API := $(foreach d,$(NDK_CANDIDATES),$(if $(wildcard $(d)/toolchains/llvm/prebuilt/$(PREBUILT)/bin/aarch64-linux-android$(API)-clang.cmd),$(d)))
   NDK_ROOT ?= $(if $(NDK_WITH_API),$(lastword $(sort $(NDK_WITH_API))),$(error No NDK supporting aarch64-linux-android$(API) found under LOCALAPPDATA/ANDROID_HOME. Install NDK r28+ or set NDK_ROOT=...))
+  override NDK_ROOT := $(subst \,/,$(NDK_ROOT))
   CLANG_BASE := aarch64-linux-android$(API)-clang
   NDK_CC := $(NDK_ROOT)/toolchains/llvm/prebuilt/$(PREBUILT)/bin/$(CLANG_BASE).cmd
 else
@@ -32,9 +33,8 @@ SRCS := \
   src/core/util.c \
   src/core/fops.c
 
-# Headers are inputs too: changing offsets.h/target.h must rebuild.
-HDRS := $(wildcard src/core/*.h) $(wildcard src/kernels/*.h) \
-        $(wildcard src/kernels/*/offsets.h)
+# Headers also trigger a rebuild (e.g. a freshly --register-ed src/kernels/<release>/offsets.h).
+HDRS := $(wildcard src/core/*.h src/core/*/*.h src/kernels/*.h src/kernels/*/*.h)
 
 # Device offsets are selected at runtime from uname -r.
 TARGET_CONFIG ?= target.h

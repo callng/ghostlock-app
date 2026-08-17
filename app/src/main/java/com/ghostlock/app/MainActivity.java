@@ -96,6 +96,7 @@ public class MainActivity extends Activity {
             "top.owo233.kernelsu", // forked KernelSU manager (preferred)
             "me.weishu.kernelsu",  // official KernelSU manager
             "com.resukisu.resukisu", // ReSukiSU manager
+            "com.kowx712.supermanager", // KowSU manager
     };
     private static final int COLOR_RED = 0xFFFF6B6B;
     private static final int COLOR_GREEN = 0xFF5FD68A;
