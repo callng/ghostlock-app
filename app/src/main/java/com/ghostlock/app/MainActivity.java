@@ -318,12 +318,18 @@ public class MainActivity extends Activity {
      * values equal those defaults.  A kernel_phys_load of 0x80000000 is the
      * MediaTek "no override" marker and is ignored as well.
      */
-    private static boolean matchesBuiltin(JSONObject entry) {
+    static boolean matchesBuiltin(JSONObject entry) {
         Map<String, Long> builtin = SupportedKernels.BUILTIN.get(entry.optString("release", ""));
         if (builtin == null) {
             return false;
         }
         if (builtinFieldDiffers(builtin, entry, "pselect_waiter_shift")) {
+            return false;
+        }
+        if (builtinFieldDiffers(builtin, entry, "compact_waiter")) {
+            return false;
+        }
+        if (builtinFieldDiffers(builtin, entry, "mm_struct_sz")) {
             return false;
         }
         if (entry.has("kernel_phys_load") && !entry.isNull("kernel_phys_load")) {
@@ -335,7 +341,7 @@ public class MainActivity extends Activity {
         return !objectFieldDiffers(builtin, entry.optJSONObject("symbols")) && !objectFieldDiffers(builtin, entry.optJSONObject("struct_fields"));
     }
 
-    private static boolean builtinFieldDiffers(Map<String, Long> builtin, JSONObject entry, String key) {
+    static boolean builtinFieldDiffers(Map<String, Long> builtin, JSONObject entry, String key) {
         if (!entry.has(key) || entry.isNull(key)) {
             return false;
         }
@@ -346,7 +352,7 @@ public class MainActivity extends Activity {
     /**
      * True when any non-null field in `fields` differs from the built-in value.
      */
-    private static boolean objectFieldDiffers(Map<String, Long> builtin, JSONObject fields) {
+    static boolean objectFieldDiffers(Map<String, Long> builtin, JSONObject fields) {
         if (fields == null) {
             return false;
         }
@@ -1195,13 +1201,17 @@ public class MainActivity extends Activity {
 
     /**
      * Map an extractor exit code to the user-facing failure message.
-     * 3: pselect route infeasible, 4: missing required offsets, 5: kallsyms
-     * recovery failure; -1 means the process was killed on timeout.
+     * 3: pselect route infeasible, 
+     * 4: missing required offsets, 
+     * 5: kallsyms recovery failure, 
+     * 6: primitive already fixed,
+     * -1 means the process was killed on timeout.
      */
     private int parseFailureToast(int code) {
         return switch (code) {
             case 3, 4 -> R.string.parse_failed_route;
             case 5 -> R.string.parse_failed_kallsyms;
+            case 6 -> R.string.parse_failed_fixed;
             case -1 -> R.string.parse_timeout;
             default -> R.string.parse_failed;
         };
@@ -1361,7 +1371,7 @@ public class MainActivity extends Activity {
             }
         }
         if (!anyInstalled) {
-            appendLog("KernelSU/ReSukiSU app not installed");
+            appendLog("KernelSU/ReSukiSU/Kowsu app not installed");
         }
         return null;
     }

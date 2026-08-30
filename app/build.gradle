@@ -176,7 +176,7 @@ android {
 
     defaultConfig {
         applicationId "com.ghostlock.app"
-        minSdk 35
+        minSdk 34
         targetSdk 37
         versionCode gitVersionCode
         versionName appVersionName
@@ -232,4 +232,9 @@ tasks.named('preBuild') {
 
 base {
     archivesName = "${appName}-v${appVersionName}(${gitVersionCode})"
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20260814'
 }

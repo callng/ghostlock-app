@@ -18,9 +18,7 @@ pub const SYMBOLS: &[(&str, &str)] = &[
 
 /// GKI kernels drop some data symbols; unresolved optionals emit 0 and the
 /// runtime falls back to target.h defaults.
-pub const OPTIONAL_SYMBOLS: &[&str] = &[
-    "off_security_hook_heads",
-];
+pub const OPTIONAL_SYMBOLS: &[&str] = &["off_security_hook_heads"];
 
 /// struct name -> (offset macro, BTF field)
 pub const STRUCT_FIELDS: &[(&str, &[(&str, &str)])] = &[
@@ -47,12 +45,16 @@ pub const STRUCT_FIELDS: &[(&str, &[(&str, &str)])] = &[
     (
         "rt_mutex_waiter",
         &[
+            // 6.6+ names the rb_nodes tree/pi_tree; 6.1 calls them
+            // tree_entry/pi_tree_entry (both are plain members, same layout).
             ("waiter_tree", "tree"),
             ("waiter_pi_tree", "pi_tree"),
             ("waiter_task", "task"),
             ("waiter_lock", "lock"),
             ("waiter_wake_state", "wake_state"),
             ("waiter_ww_ctx", "ww_ctx"),
+            ("waiter_tree", "tree_entry"),
+            ("waiter_pi_tree", "pi_tree_entry"),
         ],
     ),
     (
@@ -76,10 +78,7 @@ pub const STRUCT_FIELDS: &[(&str, &[(&str, &str)])] = &[
 
 pub type ResolvedSymbols = BTreeMap<String, Option<u64>>;
 
-pub fn resolve_symbols(
-    symbols: &BTreeMap<String, BTreeSet<u64>>,
-    base: u64,
-) -> ResolvedSymbols {
+pub fn resolve_symbols(symbols: &BTreeMap<String, BTreeSet<u64>>, base: u64) -> ResolvedSymbols {
     let mut result: ResolvedSymbols = BTreeMap::new();
     for (name, symbol) in SYMBOLS {
         result.insert((*name).to_string(), unique(symbols, symbol));
@@ -94,18 +93,22 @@ pub fn resolve_symbols(
     result
 }
 
-pub fn kernel_struct_macro(release: Option<&str>) -> &'static str {
-    if let Some(release) = release {
-        let mut parts = release.split('.');
-        if let (Some(major), Some(minor)) = (parts.next(), parts.next()) {
-            if let (Ok(major), Ok(minor)) = (major.parse::<u32>(), minor.parse::<u32>()) {
-                if (major, minor) >= (6, 12) {
-                    return "STRUCT_OFFSETS_6_12";
-                }
-            }
-        }
+/// Layout selector for a release, or None when that kernel has no measured
+/// geometry. Only 6.1, 6.6 and 6.12 are verified; callers treat None as
+/// "use STRUCT_OFFSETS_6_6 as a testing starting point", and the extractor
+/// warns so nobody mistakes a fallback table for a verified one.
+pub fn kernel_struct_macro(release: Option<&str>) -> Option<&'static str> {
+    let release = release?;
+    let mut parts = release.split('.');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let minor = parts.next()?.parse::<u32>().ok()?;
+    match (major, minor) {
+        // 6.1 android14 builds use the flat compact-waiter layout.
+        (6, 1) => Some("STRUCT_OFFSETS_6_1"),
+        (6, 6) => Some("STRUCT_OFFSETS_6_6"),
+        (6, 12) => Some("STRUCT_OFFSETS_6_12"),
+        _ => None,
     }
-    "STRUCT_OFFSETS_6_6"
 }
 
 pub type ResolvedStructs = BTreeMap<String, Option<u32>>;
@@ -133,10 +136,17 @@ pub fn resolve_structs(btf: Option<&Btf>) -> ResolvedStructs {
             continue;
         }
         for (macro_name, field_name) in *fields {
-            result.insert(
-                (*macro_name).to_string(),
-                btf.field(struct_name, field_name),
-            );
+            let value = btf.field(struct_name, field_name);
+            // Alias entries (e.g. tree/tree_entry) resolve on one kernel
+            // naming only; never clobber a resolved value with a miss.
+            match result.get(*macro_name).copied().flatten() {
+                Some(old) if value.is_none() => {
+                    result.insert((*macro_name).to_string(), Some(old));
+                }
+                _ => {
+                    result.insert((*macro_name).to_string(), value);
+                }
+            }
         }
     }
     result.insert("struct_page_size".to_string(), btf.size("page"));
@@ -144,7 +154,10 @@ pub fn resolve_structs(btf: Option<&Btf>) -> ResolvedStructs {
         "struct_page_compound_head".to_string(),
         btf.field("page", "compound_head"),
     );
-    result.insert("struct_page_type".to_string(), btf.field("page", "page_type"));
+    result.insert(
+        "struct_page_type".to_string(),
+        btf.field("page", "page_type"),
+    );
     result.insert(
         "struct_slab_cache".to_string(),
         btf.field("slab", "slab_cache"),

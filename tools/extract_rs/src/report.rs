@@ -4,13 +4,14 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::error::{ExtractError, Result};
 use crate::symbols::{OPTIONAL_SYMBOLS, STRUCT_FIELDS, SYMBOLS};
 
 pub const MTK_DEFAULT_PHYS_LOAD: u64 = 0x8000_0000;
 pub const QC_PHYS_LOAD_6_6: u64 = 0xA800_0000;
+pub const QC_PHYS_LOAD_6_1: u64 = 0xA800_0000;
 pub const QC_PHYS_LOAD_6_12: u64 = 0xC780_0000;
 
 /// Python insertion order of resolve_symbols(): header output matches the
@@ -60,36 +61,36 @@ pub fn phys_needs_override(release: Option<&str>, phys: Option<u64>) -> bool {
     if phys == MTK_DEFAULT_PHYS_LOAD {
         return false;
     }
-    let default = if crate::symbols::kernel_struct_macro(release) == "STRUCT_OFFSETS_6_12" {
-        QC_PHYS_LOAD_6_12
-    } else {
-        QC_PHYS_LOAD_6_6
+    let default = match crate::symbols::kernel_struct_macro(release) {
+        Some("STRUCT_OFFSETS_6_12") => QC_PHYS_LOAD_6_12,
+        Some("STRUCT_OFFSETS_6_1") => QC_PHYS_LOAD_6_1,
+        _ => QC_PHYS_LOAD_6_6,
     };
     phys != default
 }
 
 pub fn pselect_waiter_shift_for(release: Option<&str>) -> i64 {
-    if crate::symbols::kernel_struct_macro(release) == "STRUCT_OFFSETS_6_12" {
-        0
-    } else {
-        -2
+    match crate::symbols::kernel_struct_macro(release) {
+        Some("STRUCT_OFFSETS_6_12") => 0,
+        // android14-6.1 compiles its fd_set words one qword later than
+        // 6.6; the committed tables all measure 1.
+        Some("STRUCT_OFFSETS_6_1") => 1,
+        _ => -2,
     }
 }
 
-pub fn validate_kernel_phys_load(
-    release: Option<&str>,
-    phys: Option<u64>,
-    mtk: bool,
-) -> bool {
+pub fn validate_kernel_phys_load(release: Option<&str>, phys: Option<u64>, mtk: bool) -> bool {
     let Some(phys) = phys else {
         return false;
     };
     let expected = if mtk {
         MTK_DEFAULT_PHYS_LOAD
-    } else if crate::symbols::kernel_struct_macro(release) == "STRUCT_OFFSETS_6_12" {
-        QC_PHYS_LOAD_6_12
     } else {
-        QC_PHYS_LOAD_6_6
+        match crate::symbols::kernel_struct_macro(release) {
+            Some("STRUCT_OFFSETS_6_12") => QC_PHYS_LOAD_6_12,
+            Some("STRUCT_OFFSETS_6_1") => QC_PHYS_LOAD_6_1,
+            _ => QC_PHYS_LOAD_6_6,
+        }
     };
     if phys == expected {
         return false;
@@ -118,11 +119,15 @@ pub fn render_device(
     lines.push(format!("    \"{release}\","));
     lines.push(format!(
         "    {},",
-        crate::symbols::kernel_struct_macro(Some(release))
+        // unverified kernels render with the 6.6 layout as a testing start;
+        // the extractor warns whenever it falls back
+        crate::symbols::kernel_struct_macro(Some(release)).unwrap_or("STRUCT_OFFSETS_6_6")
     ));
     if phys_needs_override(Some(release), phys) {
         lines.push(format!("    .kernel_phys_load = 0x{:x},", phys.unwrap()));
     }
+    // 6.1 entries get their mm_struct_sz=0x400 stride from the
+    // STRUCT_OFFSETS_6_1 macro itself; nothing extra to emit here.
     lines.push(format!("    .pselect_waiter_shift = {pselect_shift},"));
     for key in symbol_render_order() {
         if let Some(value) = symbols.get(key).copied().flatten() {
@@ -132,9 +137,7 @@ pub fn render_device(
     lines.push("),".to_string());
     let mut reference: Vec<(&str, u32)> = Vec::new();
     for key in struct_render_order() {
-        if key.starts_with("struct_page")
-            || key == "struct_slab_cache"
-            || key == "struct_mm_struct"
+        if key.starts_with("struct_page") || key == "struct_slab_cache" || key == "struct_mm_struct"
         {
             if let Some(value) = structs.get(key).copied().flatten() {
                 reference.push((key, value));
@@ -145,7 +148,11 @@ pub fn render_device(
         lines.push(String::new());
         lines.push("/* BTF reference (runtime uses target.h defaults): */".to_string());
         for (key, value) in &reference {
-            lines.push(format!("/* #define {} 0x{:X} */", key.to_uppercase(), value));
+            lines.push(format!(
+                "/* #define {} 0x{:X} */",
+                key.to_uppercase(),
+                value
+            ));
         }
     }
     lines.join("\n") + "\n"
@@ -160,7 +167,10 @@ pub fn render_c(
     pselect_shift: i64,
 ) -> String {
     let label = release.unwrap_or(name);
-    let mut lines = vec![format!("/* Generated offsets for {label}. */"), String::new()];
+    let mut lines = vec![
+        format!("/* Generated offsets for {label}. */"),
+        String::new(),
+    ];
     lines.push("#define STRUCT_OFFSETS_EXTRACTED \\".to_string());
     let task_keys = [
         "task_prio",
@@ -194,11 +204,24 @@ pub fn render_c(
         lines.push(format!("  .{key} = 0x{value:X},{suffix}"));
     }
     lines.push(String::new());
+    let macro_name = crate::symbols::kernel_struct_macro(release);
     lines.push(format!("OFFSETS_ENTRY(\"{label}\","));
+    lines.push(format!(
+        "  {},",
+        // unverified kernels render with the 6.6 layout as a testing start;
+        // the extractor warns whenever it falls back
+        macro_name.unwrap_or("STRUCT_OFFSETS_6_6")
+    ));
     if phys_needs_override(release, phys) {
         lines.push(format!("  .kernel_phys_load=0x{:X},", phys.unwrap()));
     }
     lines.push(format!("  .pselect_waiter_shift={pselect_shift},"));
+    if macro_name == Some("STRUCT_OFFSETS_6_1") {
+        // spell the layout fields out so a manually registered header does
+        // not depend on the selector macro carrying them
+        lines.push("  .compact_waiter=1,".to_string());
+        lines.push("  .mm_struct_sz=0x400,".to_string());
+    }
     for key in symbol_render_order() {
         if let Some(value) = symbols.get(key).copied().flatten() {
             lines.push(format!("  .{key}=0x{value:08X},"));
@@ -251,7 +274,7 @@ pub fn build_report(
             )
         })
         .collect();
-    json!({
+    let mut report = json!({
         "release": release,
         "kimage_text_base": base,
         "kernel_phys_load": phys,
@@ -259,10 +282,32 @@ pub fn build_report(
         "symbols": symbol_json,
         "struct_fields": struct_json,
         "btf_size": btf_size,
-    })
+    });
+    if crate::symbols::kernel_struct_macro(release) == Some("STRUCT_OFFSETS_6_1") {
+        // 0x400 is the device SLUB stride, not the BTF 0x3c0
+        report["compact_waiter"] = json!(1);
+        report["mm_struct_sz"] = json!(0x400);
+    }
+    report
 }
 
+/* Resolve the repo the extractor reads and writes kernel tables in.
+ * The manifest dir baked in at build time goes stale the moment the
+ * binary runs from another checkout or a linked worktree, so ask git
+ * for the toplevel of the working directory first and only fall back
+ * to the manifest path when there is no repo around (on-device runs). */
 fn repo_root() -> PathBuf {
+    if let Ok(out) = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+    {
+        if out.status.success() {
+            let top = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !top.is_empty() {
+                return PathBuf::from(top);
+            }
+        }
+    }
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -306,10 +351,7 @@ pub fn existing_entries() -> BTreeMap<String, EntryFields> {
             let tail = &text[entry_match.get(0).unwrap().end()..];
             let mut fields: EntryFields = BTreeMap::new();
             for field_match in field_re.captures_iter(tail) {
-                fields.insert(
-                    field_match[1].to_string(),
-                    parse_int(&field_match[2]),
-                );
+                fields.insert(field_match[1].to_string(), parse_int(&field_match[2]));
             }
             entries.entry(release).or_insert(fields);
         }
@@ -317,10 +359,7 @@ pub fn existing_entries() -> BTreeMap<String, EntryFields> {
     entries
 }
 
-pub fn warn_existing_mismatches(
-    release: &str,
-    symbols: &BTreeMap<String, Option<u64>>,
-) {
+pub fn warn_existing_mismatches(release: &str, symbols: &BTreeMap<String, Option<u64>>) {
     let entries = existing_entries();
     let Some(existing) = entries.get(release) else {
         return;
@@ -356,7 +395,10 @@ fn kernel_include_sort_key(include: &str) -> Vec<(u8, SortPart)> {
     for caps in re.captures_iter(path) {
         let matched = caps.get(0).unwrap();
         if matched.start() > cursor {
-            key.push((1, SortPart::Text(path[cursor..matched.start()].to_ascii_lowercase())));
+            key.push((
+                1,
+                SortPart::Text(path[cursor..matched.start()].to_ascii_lowercase()),
+            ));
         }
         key.push((0, SortPart::Digit(matched.as_str().parse::<u64>().unwrap())));
         cursor = matched.end();
@@ -447,6 +489,52 @@ pub fn task_keys_list() -> &'static [&'static str] {
     ]
 }
 
-pub fn struct_fields_reference() -> &'static [(&'static str, &'static [(&'static str, &'static str)])] {
+pub fn struct_fields_reference()
+-> &'static [(&'static str, &'static [(&'static str, &'static str)])] {
     STRUCT_FIELDS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{pselect_waiter_shift_for, render_c};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn render_c_carries_the_layout_selector_and_6_1_scalars() {
+        let symbols: BTreeMap<String, Option<u64>> = BTreeMap::new();
+        let structs: BTreeMap<String, Option<u32>> = BTreeMap::new();
+        let out = render_c(
+            Some("6.1.118-android14-11-gca0ef6d17716-ab13624819"),
+            "x",
+            &symbols,
+            &structs,
+            None,
+            1,
+        );
+        assert!(out.contains("STRUCT_OFFSETS_6_1"));
+        assert!(out.contains(".compact_waiter=1"));
+        assert!(out.contains(".mm_struct_sz=0x400"));
+
+        let out66 = render_c(
+            Some("6.6.92-android15-8"),
+            "x",
+            &symbols,
+            &structs,
+            None,
+            -2,
+        );
+        assert!(out66.contains("STRUCT_OFFSETS_6_6"));
+        assert!(!out66.contains("compact_waiter"));
+    }
+
+    #[test]
+    fn pselect_waiter_shift_matches_the_committed_tables() {
+        assert_eq!(
+            pselect_waiter_shift_for(Some("6.1.118-android14-11-gca0ef6d17716-ab13624819")),
+            1
+        );
+        assert_eq!(pselect_waiter_shift_for(Some("6.6.92-android15-8")), -2);
+        assert_eq!(pselect_waiter_shift_for(Some("6.12.30-android16-0")), 0);
+        assert_eq!(pselect_waiter_shift_for(None), -2);
+    }
 }

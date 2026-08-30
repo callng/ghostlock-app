@@ -5,15 +5,24 @@
 ## Supported Devices
 
 | Kernel                                                 | Devices                                                          |
-| ------------------------------------------------------ |------------------------------------------------------------------|
+| ------------------------------------------------------ | ---------------------------------------------------------------- |
+| `6.1.118-android14-11-ga3b9c44908dd-ab13320413`        | Redmi Note 15 Pro+                                               |
+| `6.1.118-android14-11-gca0ef6d17716-ab13624819`        | Xiaomi 14                                                        |
+| `6.1.138-android14-11-g0c3d559bcd85-ab14529422`        | Xiaomi 14                                                        |
+| `6.1.145-android14-11-g09f1c0074ad7-ab14226177`        | Infinix Note 50s 5G                                              |
+| `6.1.145-android14-11-g74d1702dab4d-ab14669069`        | vivo T4                                                          |
+| `6.1.145-android14-11-geaa643a2c0ee-ab14763719`        | Motorola Razr 50 Ultra / Motorola Razr+ 2024                     |
+| `6.1.162-android14-11-gce140c0e5bf5-ab15450923`        | Zenfone 11 Ultra                                                 |
 | `6.6.30-android15-8-g54dcbfbef792-ab12368803-4k`       | Red Magic Tablet 3 Pro                                           |
 | `6.6.77-android15-8-g4a507830d890-ab13636293-4k`       | Xiaomi Civi 5 Pro, REDMI K90 / 4 Turbo, POCO F7                  |
 | `6.6.77-android15-8-g63ce7556864c-ab13994517-4k`       | Xiaomi 15                                                        |
 | `6.6.77-android15-8-gca30f3b4bef6-abogki440974771-4k`  | Xiaomi 15 Pro, REDMI K80 Pro / K80 Ultra                         |
 | `6.6.89-android15-8-g096cdb6ecefc-ab14358676-4k`       | OPPO Pad 4 Pro                                                   |
 | `6.6.89-android15-8-g0889fe95bb10-ab14402178-4k`       | POCO X8 Pro Max                                                  |
+| `6.6.89-android15-8-g8e4be6b47e40-ab14134548-4k`       | POCO X8 Pro                                                      |
 | `6.6.89-android15-8-gf4dc45704e54-abogki446052083-4k`  | OnePlus 13                                                       |
 | `6.6.92-android15-8-g3637f4904cf5-ab13944661-4k`       | Red Magic Tablet 3 Pro, Red Magic 10 Pro, Red Magic 11 Air       |
+| `6.6.102-android15-8-gab8eb70a71b8-ab14350911-4k`      | Nothing Phone 3                                                  |
 | `6.6.102-android15-8-gb01b41c2647c-ab15574720-4k`      | Xiaomi 17T                                                       |
 | `6.6.102-android15-8-gfe76d1bc97fd-ab14689815-4k`      | Xiaomi 17T                                                       |
 | `6.6.118-android15-8-g2e6b9c3812c5-ab15114928-4k`      | OPPO Find N5                                                     |
@@ -21,7 +30,7 @@
 | `6.6.118-android15-8-g608a629fedf7-ab15154340-4k`      | REDMI K90 Ultra                                                  |
 | `6.6.118-android15-8-gc44b714366cc-abogki519650608-4k` | REDMI K80 Pro / Turbo 5 Max, POCO X8 Pro Max, Xiaomi Pad 7 Ultra |
 | `6.6.118-android15-8-ge56cf6b09cca-ab15511674-4k`      | REDMI K90 Ultra, POCO F7                                         |
-| `6.6.118-android15-8-ge58033dc8ea6-abogki498046332-4k` | OPPO Pad 5, OnePlus Pad 2                                        |
+| `6.6.118-android15-8-ge58033dc8ea6-abogki498046332-4k` | OPPO Pad 5, OnePlus Pad 2, OPPO Find X8s                         |
 | `6.6.118-android15-8-gebdfad32d749-ab15099304-4k`      | OPPO Find X8 / Find X8 Pro                                       |
 | `6.12.23-android16-5-g16e473de48a3-abogki462654244-4k` | REDMI K90 Pro Max                                                |
 | `6.12.23-android16-5-g75e9b1c7ae7c-abogki463945075-4k` | Xiaomi 17 / 17 Pro / 17 Pro Max / 17 Ultra                       |
@@ -30,8 +39,8 @@
 | `6.12.23-android16-5-gb2a876903b49-ab14541642-4k`      | OnePlus 15                                                       |
 | `6.12.23-android16-5-gf1bdb13583da-ab13761046-4k`      | Red Magic 11 Pro, Tablet 5 Pro                                   |
 | `6.12.30-android16-5-g6e872b4863d6-ab13847919-4k`      | REDMI Note 15 4G, POCO M6 Pro 4G                                 |
+| `6.12.38-android16-5-g3c4da6410bcb-ab13872285-4k`      | Xiaomi 13T                                                       |
 | `6.12.38-android16-5-g844001fb8721-ab14552068-4k`      | OnePlus 15T                                                      |
-
 
 Kernels are matched by exact `uname -r`; unsupported builds are rejected and the app shows the status at the top. Offsets live in `src/kernels/<uname-release>/offsets.h` — add new builds with the extractor's `--register`.
 
@@ -75,9 +84,9 @@ Output: `ghostlock` in the project root — see [Command-Line Debugging](#comman
 
 Open the **GhostLock** app and tap **Run**; the exploit runs automatically.
 
-Install a KernelSU manager first so `ksud` is available: the forked manager (`top.owo233.kernelsu`) is preferred, falling back to the official KernelSU (`me.weishu.kernelsu`) or ReSukiSU (`com.resukisu.resukisu`). Without `ksud`, stages W1/W2 still grant uid 0, but the KernelSU module will not be loaded.
+Install a KernelSU manager first so `ksud` is available: the forked manager (`top.owo233.kernelsu`) is preferred, falling back to KernelSU (`me.weishu.kernelsu`), ReSukiSU (`com.resukisu.resukisu`), or KowSU SuperManager (`com.kowx712.supermanager`). Without `ksud`, stages W1/W2 still grant uid 0, but the KernelSU module will not be loaded.
 
-The route races two cores: the main thread hammers `pselect` while a consumer thread perturbs the waiter's priority. The pair defaults to the big cores (fallback 0/1), overridable via `GHOSTLOCK_CORE` / `GHOSTLOCK_CONSUMER_CORE`.
+The route races two cores. On the 6.6/6.12 tree-waiter kernels the main thread hammers `select` while a consumer thread perturbs the waiter's priority; on the 6.1 compact-waiter kernels the main thread drives `getsockopt(TCP_ZEROCOPY_RECEIVE)` through a punched-hole page instead (`GHOSTLOCK_TCP_ROUTE=0` forces the pselect route). The pair defaults to the big cores (fallback 0/1), overridable via `GHOSTLOCK_CORE` / `GHOSTLOCK_CONSUMER_CORE`.
 
 ## Command-Line Debugging
 
@@ -101,6 +110,10 @@ tools/extract_rs/target/release/ghostlock-extract.exe OTA.zip --format json --ou
 ```
 
 `--register` saves the table under `src/kernels/<uname-release>/offsets.h`; `--format c --out offsets.h` dumps a standalone header.
+
+### Preflight
+
+The extractor disassembles `remove_waiter()` before extracting offsets. Kernels with the fix are rejected with exit code `6`; only vulnerable kernels continue.
 
 ### On-device analysis
 
@@ -134,13 +147,15 @@ extractor in-process and write `offsets.json` into the app data dir on
 success.
 
 ```json
-[{
-  "release": "6.12.38-android16-5-g844001fb8721-ab14552068-4k",
-  "kernel_phys_load": 3347054592,
-  "pselect_waiter_shift": 0,
-  "symbols": { "off_init_task": 37801728, "off_init_cred": 37891184 },
-  "struct_fields": { "task_prio": 148, "task_cred": 2304 }
-}]
+[
+  {
+    "release": "6.12.38-android16-5-g844001fb8721-ab14552068-4k",
+    "kernel_phys_load": 3347054592,
+    "pselect_waiter_shift": 0,
+    "symbols": { "off_init_task": 37801728, "off_init_cred": 37891184 },
+    "struct_fields": { "task_prio": 148, "task_cred": 2304 }
+  }
+]
 ```
 
 ## Credits & License

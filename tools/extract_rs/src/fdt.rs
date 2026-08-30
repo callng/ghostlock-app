@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::boot::{align, PAGE_SIZE};
+use crate::boot::{PAGE_SIZE, align};
 use crate::error::{ExtractError, Result};
 
 pub const FDT_MAGIC: u32 = 0xD00D_FEED;
@@ -59,7 +59,8 @@ pub fn recover_kernel_phys_load(path: &Path) -> Result<u64> {
             let mut stack: Vec<FdtNode> = Vec::new();
             let mut regions: Vec<(String, String, u64, u64)> = Vec::new();
             let mut p = struct_start;
-            while p < struct_end {
+            let mut terminated = false;
+            while p + 4 <= struct_end {
                 let token = rd_be_u32(&data, p);
                 if token == FDT_BEGIN_NODE {
                     let Some(nul) = find_byte(&data, p + 4, struct_end) else {
@@ -103,9 +104,12 @@ pub fn recover_kernel_phys_load(path: &Path) -> Result<u64> {
                     let Some(node) = stack.pop() else {
                         return Err(ExtractError::new("FDT end without node"));
                     };
+                    // SM8650 xbl_config spells it "MemLabel"; the dt-binding
+                    // name is "mem-label". Accept either.
                     let label = node
                         .props
-                        .get("mem-label")
+                        .get("MemLabel")
+                        .or_else(|| node.props.get("mem-label"))
                         .map(|v| {
                             let end = find_byte(v, 0, v.len()).unwrap_or(v.len());
                             String::from_utf8_lossy(&v[..end]).into_owned()
@@ -170,10 +174,14 @@ pub fn recover_kernel_phys_load(path: &Path) -> Result<u64> {
                 } else if token == FDT_NOP {
                     p += 4;
                 } else if token == FDT_END {
+                    terminated = true;
                     break;
                 } else {
                     return Err(ExtractError::new("unknown FDT token"));
                 }
+            }
+            if !terminated {
+                return Err(ExtractError::new("truncated FDT: no end token"));
             }
             let nomap: Vec<(u64, u64)> = regions
                 .iter()
