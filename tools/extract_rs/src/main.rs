@@ -162,7 +162,11 @@ fn resolve_kallsyms(
         }
         // kptr_restrict zeroes every address; treat that as a missing table
         if let Ok(ks) = parse_kallsyms_file(&path) {
-            if ks.symbols.values().any(|addrs| addrs.iter().any(|&a| a != 0)) {
+            if ks
+                .symbols
+                .values()
+                .any(|addrs| addrs.iter().any(|&a| a != 0))
+            {
                 return Ok(ks);
             }
         }
@@ -205,7 +209,15 @@ fn run(cli: &Cli) -> Result<i32> {
 
     let boot = BootImage::load(&boot_path)?;
     let mut kernel_phys_load = if let Some(xbl) = &xbl_path {
-        Some(recover_kernel_phys_load(xbl)?)
+        match recover_kernel_phys_load(xbl) {
+            Ok(phys) => Some(phys),
+            Err(err) => {
+                eprintln!(
+                    "warning: xbl_config FDT parse failed: {err}; proceeding with boot-only analysis"
+                );
+                cli.phys
+            }
+        }
     } else {
         cli.phys
     };
