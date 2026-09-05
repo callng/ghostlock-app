@@ -270,8 +270,7 @@ impl Btf {
             if member.name.is_empty() {
                 if let Some(child) = self.resolve(member.type_id) {
                     if child.kind == KIND_STRUCT || child.kind == KIND_UNION {
-                        if let Some(found) =
-                            self.find_member(child, name, offset, depth + 1, seen)
+                        if let Some(found) = self.find_member(child, name, offset, depth + 1, seen)
                         {
                             return Some(found);
                         }
