@@ -47,6 +47,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
     private val cpuPairLabels = mutableListOf<String>()
     private var selectedCpuPair = 0
     private var safeModeEnabled = false
+    private var tcpRouteEnabled = true
     private var pendingParsedEntries: JSONArray? = null
 
     init {
@@ -63,6 +64,8 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         cpuPairLabels = cpuPairLabels.toList(),
         selectedCpuPair = selectedCpuPair,
         safeModeEnabled = safeModeEnabled,
+        tcpRouteEnabled = tcpRouteEnabled,
+        compact = isCompactKernel(),
     )
 
     override fun selectCpuPair(index: Int) {
@@ -76,6 +79,10 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
 
     override fun setSafeModeEnabled(enabled: Boolean) {
         safeModeEnabled = enabled
+    }
+
+    override fun setTcpRouteEnabled(enabled: Boolean) {
+        tcpRouteEnabled = enabled
     }
 
     override suspend fun exportCandidates(): List<OffsetCandidate> {
@@ -215,17 +222,20 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
             val binary = File(appContext.applicationInfo.nativeLibraryDir, "libghostlock.so")
             require(binary.isFile) { "missing native binary: ${binary.absolutePath}" }
             if (prepareKsud(workDir, onLog) != null) onLog("ksud ready") else onLog("warning: ksud not found")
-            val ksuLog = File(workDir, KsuLogName)
-            ksuLog.delete()
+            // the root script creates its log as root, so one name per run
+            // keeps the last run's lines out of this run's log
+            val ksuLog = File(workDir, "$KsuLogName.${System.currentTimeMillis()}")
             val nativeLog = File(workDir, ".ghostlock_native.log")
             nativeLog.writeText("")
             val ksuOffset = AtomicLong()
             val nativeOffset = AtomicLong()
+            // tag root-script lines so they cannot be read as the native stages'
+            val ksuSink: (String) -> Unit = { onLog("[ksu] $it") }
             val tailer = Thread {
                 try {
                     while (!Thread.currentThread().isInterrupted) {
                         tailKsuLog(nativeLog, nativeOffset, onLog)
-                        tailKsuLog(ksuLog, ksuOffset, onLog)
+                        tailKsuLog(ksuLog, ksuOffset, ksuSink)
                         Thread.sleep(200)
                     }
                 } catch (_: InterruptedException) {
@@ -244,11 +254,13 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     environment()["GHOSTLOCK_HOME"] = workDir.absolutePath
                     environment()["TMPDIR"] = workDir.absolutePath
                     environment()["HOME"] = workDir.absolutePath
+                    environment()["GHOSTLOCK_KSU_LOG"] = ksuLog.absolutePath
                     if (pair.primary != 0 || pair.consumer != 1) {
                         environment()["GHOSTLOCK_CORE"] = pair.primary.toString()
                         environment()["GHOSTLOCK_CONSUMER_CORE"] = pair.consumer.toString()
                     }
                     if (safeModeEnabled) environment()["GHOSTLOCK_DISABLE_MODULES"] = "1"
+                    if (!tcpRouteEnabled) environment()["GHOSTLOCK_TCP_ROUTE"] = "0"
                 }
             try {
                 runProcess(command, onLog = {}, captureOutput = false)
@@ -257,7 +269,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                     tailer.interrupt()
                     tailer.join(1000)
                     tailKsuLog(nativeLog, nativeOffset, onLog)
-                    tailKsuLog(ksuLog, ksuOffset, onLog)
+                    tailKsuLog(ksuLog, ksuOffset, ksuSink)
                 }
             }
         } catch (error: CancellationException) {
@@ -365,6 +377,19 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
     private fun isKernelSupported(): Boolean {
         val version = System.getProperty("os.version", "").orEmpty()
         return version in SupportedKernels.UNAMES || importedOffsetsMatch(version)
+    }
+
+    private fun isCompactKernel(): Boolean {
+        val version = System.getProperty("os.version", "").orEmpty()
+        // an imported entry overrides the built-in one, a member it omits keeps the built-in
+        // value, as in select_offsets. first match wins, same as load_offsets_json
+        val entries = readOffsetsFile(offsetsFile)
+        val imported = (0 until (entries?.length() ?: 0))
+            .mapNotNull { entries?.optJSONObject(it) }
+            .firstOrNull { it.optString("release", "") == version }
+            ?.let { toKernelOffsets(it).scalars["compact_waiter"] }
+        val value = imported ?: SupportedKernels.BUILTIN[version]?.get("compact_waiter")
+        return value != null && value != 0L
     }
 
     private fun importedOffsetsMatch(version: String): Boolean {

