@@ -34,9 +34,6 @@ jobs:
           java-version: 21
           distribution: zulu
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
