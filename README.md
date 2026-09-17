@@ -12,11 +12,12 @@
 | `6.1.138-android14-11-g0c3d559bcd85-ab14529422`        | Xiaomi 14                                                        |
 | `6.1.138-android14-11-g6ab8c9a86a33-ab14396278`        | POCO X6 Pro                                                      |
 | `6.1.138-android14-11-g44bda9e8f6e9-ab13792638`        | POCO X6 Pro                                                      |
-| `6.1.138-android14-11-g965475777129-mi`      | REDMI K80          |
+| `6.1.138-android14-11-g965475777129-mi`                | REDMI K80                                                        |
 | `6.1.145-android14-11-g09f1c0074ad7-ab14226177`        | Infinix Note 50s 5G, Infinix GT 30 (X6876)                       |
 | `6.1.145-android14-11-g74d1702dab4d-ab14669069`        | vivo T4                                                          |
 | `6.1.145-android14-11-geaa643a2c0ee-ab14763719`        | Motorola Razr 50 Ultra / Motorola Razr+ 2024                     |
 | `6.1.162-android14-11-gce140c0e5bf5-ab15450923`        | Zenfone 11 Ultra                                                 |
+| `6.1.162-android14-11-g752d9c17787d-ab15574904`        | Pixel 9 Pro, Pixel 9 Pro Fold                                     |
 | `6.6.30-android15-8-g54dcbfbef792-ab12368803-4k`       | Red Magic Tablet 3 Pro                                           |
 | `6.6.77-android15-8-g4a507830d890-ab13636293-4k`       | Xiaomi Civi 5 Pro, REDMI K90 / 4 Turbo, POCO F7                  |
 | `6.6.77-android15-8-g63ce7556864c-ab13994517-4k`       | Xiaomi 15                                                        |
@@ -31,6 +32,7 @@
 | `6.6.102-android15-8-gab8eb70a71b8-ab14350911-4k`      | Nothing Phone 3                                                  |
 | `6.6.102-android15-8-gb01b41c2647c-ab15574720-4k`      | Xiaomi 17T                                                       |
 | `6.6.102-android15-8-gfe76d1bc97fd-ab14689815-4k`      | Xiaomi 17T                                                       |
+| `6.6.118-android15-8-g21be90ecfb5e-ab15480137-4k`      | Honor Magic V5 (10.0.0.165)                                      |
 | `6.6.118-android15-8-g2e6b9c3812c5-ab15114928-4k`      | OPPO Find N5                                                     |
 | `6.6.118-android15-8-g93e223c276e7-abogki500782043-4k` | OPPO Find X8 Ultra, OnePlus 13 / ACE 5 Pro, OnePlus 13T         |
 | `6.6.118-android15-8-g608a629fedf7-ab15154340-4k`      | REDMI K90 Ultra                                                  |
@@ -49,6 +51,7 @@
 | `6.12.38-android16-5-g1d46253471dd-ab15048002-4k`      | Motorola Razr Fold                                               |
 | `6.12.38-android16-5-g3c4da6410bcb-ab13872285-4k`      | Xiaomi 13T                                                       |
 | `6.12.38-android16-5-g74ad46052215-ab14494108-4k`      | Lenovo Legion Y700 Wuji                                          |
+| `6.12.38-android16-5-g665eafb62659-ab14778838-4k`      | Red Magic 11 Pro / 11 Pro+, nubia NaviX Ultra                    |
 | `6.12.38-android16-5-g844001fb8721-ab14552068-4k`      | OnePlus 15T                                                      |
 
 Kernels are matched by exact `uname -r`; unsupported builds are rejected and the app shows the status at the top. Offsets live in `src/kernels/<uname-release>/offsets.h` — add new builds with the extractor's `--register`.
