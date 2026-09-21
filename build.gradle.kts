@@ -114,6 +114,7 @@ tasks.register<Exec>("buildGhostlockExtract") {
     environment("CC_aarch64_linux_android", tools.clang)
     environment("AR_aarch64_linux_android", tools.ar)
     environment("CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER", tools.clang)
+    environment("RUSTFLAGS", "-C force-unwind-tables=no -C link-arg=-Wl,--icf=all")
     if (isOndk) environment("RUSTC_BOOTSTRAP", "1")
     inputs.files(
         fileTree("tools/extract_rs/src") { include("**/*.rs") },

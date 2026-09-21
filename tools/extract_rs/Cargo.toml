@@ -26,7 +26,10 @@ package = "payload-extract"
 git = "https://github.com/YuKongA/payload_extract_rs"
 rev = "5534f07298d9f366d6a71daf52cb09141ed96a8a"
 default-features = false
-features = ["http-rustls"]
+
+[features]
+default = []
+http = ["payload-extract/http-rustls"]
 
 [dev-dependencies]
 lz4_flex = "0.14"
