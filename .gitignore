@@ -22,4 +22,6 @@ target/
 *.keystore
 /.codex/
 /src/.codex/config.toml
+# Created accidentally by `2>nul` redirection in cmd/PowerShell.
+/nul
 /ghostlock *

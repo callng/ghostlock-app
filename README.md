@@ -29,8 +29,9 @@ Rows explicitly marked **Shizuku required** run through a shell UserService. Sta
 Notes:
 
 - GnuWin32 make installs to `C:\Program Files (x86)\GnuWin32\bin` — open a new terminal (or add it to `PATH` manually) so `make` is found.
-- The Android SDK location is read from `local.properties` (`sdk.dir`) or the `ANDROID_HOME` environment variable.
-- The Makefile auto-detects the NDK from `LOCALAPPDATA`/`ANDROID_HOME` and picks the **newest NDK that supports the target API (35)**. Older NDKs (e.g. r26, which only ships clang wrappers up to android-34) are skipped automatically; you can also force a version with `NDK_ROOT`.
+- Run `make` from **Git Bash**, not from PowerShell/cmd. `src/Makefile` is a POSIX makefile (`mkdir -p`, `rm -f`, `uname -s`), and GnuWin32's make defaults to a bare `sh.exe` that only exists in the MSYS environment Git for Windows provides. Building from PowerShell fails with `The syntax of the command is incorrect`.
+- The Android SDK location is read from `local.properties` (`sdk.dir`) or the `ANDROID_HOME` environment variable; the NDK is taken from `ANDROID_NDK_HOME`/`ANDROID_NDK_ROOT`. On Windows the auto-detection takes the **first** NDK directory it finds, which may be an older release (e.g. r26) that has no `aarch64-linux-android35-clang.cmd`; pass `NDK_ROOT=<path>` if the build reports a missing compiler.
+- Use JDK 25 to run Gradle: Android Gradle Plugin 9.x requires it, and Gradle will otherwise try to download a toolchain.
 
 ### Build the APK
 
@@ -48,7 +49,7 @@ The Gradle build calls `make` to compile the native binary and packages it into 
 make ghostlock
 ```
 
-Output: `ghostlock` in the project root — see [Command-Line Debugging](#command-line-debugging) for how to run it on a device. Use `make clean` to remove the binary.
+Output: `build/native/ghostlock` — see [Command-Line Debugging](#command-line-debugging) for how to run it on a device. The root `make` is a thin forwarder to `src/Makefile`, which is where the actual build lives. Use `make clean` to remove the binary.
 
 ## Quick Start
 

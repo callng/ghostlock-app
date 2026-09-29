@@ -29,8 +29,9 @@
 注意事项：
 
 - GnuWin32 make 会装到 `C:\Program Files (x86)\GnuWin32\bin` —— 装完后**新开一个终端**（或手动加入 `PATH`），`make` 才能被找到。
-- Android SDK 路径通过 `local.properties`（`sdk.dir`）或 `ANDROID_HOME` 环境变量读取。
-- Makefile 会从 `LOCALAPPDATA`/`ANDROID_HOME` 自动检测 NDK，并**优先选用支持目标 API（35）的最新版 NDK**。旧版本（如 r26 只提供到 android-34 的 clang 包装）会被自动跳过；也可以用 `NDK_ROOT` 强制指定版本。
+- 请在 **Git Bash** 中运行 `make`，不要在 PowerShell/cmd 里跑。`src/Makefile` 是 POSIX 风格的 makefile（用到 `mkdir -p`、`rm -f`、`uname -s`），而 GnuWin32 版 make 默认调用的 `sh.exe` 只存在于 Git for Windows 提供的 MSYS 环境中。在 PowerShell 中构建会报 `The syntax of the command is incorrect`。
+- Android SDK 路径通过 `local.properties`（`sdk.dir`）或 `ANDROID_HOME` 环境变量读取；NDK 走 `ANDROID_NDK_HOME`/`ANDROID_NDK_ROOT`。Windows 上的自动探测会取**第一个**找到的 NDK 目录，可能是旧版本（如 r26，不含 `aarch64-linux-android35-clang.cmd`）；若报找不到编译器，请显式传 `NDK_ROOT=<路径>`。
+- 运行 Gradle 请使用 JDK 25：Android Gradle Plugin 9.x 要求该版本，否则 Gradle 会尝试自行下载工具链。
 
 ### 编译 APK
 
@@ -48,7 +49,7 @@ Gradle 构建会先调用 `make` 编译原生二进制，再以 `libghostlock.so
 make ghostlock
 ```
 
-产物：项目根目录下的 `ghostlock` —— 运行方式见下文 [命令行调试](#命令行调试)。`make clean` 可删除该二进制。
+产物：`build/native/ghostlock` —— 运行方式见下文[命令行调试](#命令行调试)。根目录的 `make` 只是转发到 `src/Makefile`，实际构建逻辑在那里。`make clean` 可删除该二进制。
 
 ## 快速开始
 
