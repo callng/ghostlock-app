@@ -32,6 +32,7 @@
 - 请在 **Git Bash** 中运行 `make`，不要在 PowerShell/cmd 里跑。`src/Makefile` 是 POSIX 风格的 makefile（用到 `mkdir -p`、`rm -f`、`uname -s`），而 GnuWin32 版 make 默认调用的 `sh.exe` 只存在于 Git for Windows 提供的 MSYS 环境中。在 PowerShell 中构建会报 `The syntax of the command is incorrect`。
 - Android SDK 路径通过 `local.properties`（`sdk.dir`）或 `ANDROID_HOME` 环境变量读取；NDK 走 `ANDROID_NDK_HOME`/`ANDROID_NDK_ROOT`。Windows 上的自动探测会取**第一个**找到的 NDK 目录，可能是旧版本（如 r26，不含 `aarch64-linux-android35-clang.cmd`）；若报找不到编译器，请显式传 `NDK_ROOT=<路径>`。
 - 运行 Gradle 请使用 JDK 25：Android Gradle Plugin 9.x 要求该版本，否则 Gradle 会尝试自行下载工具链。
+- 跑原生主机测试（`make -C src native-host-tests`）还需要一个支持 C++23 的**主机** C++ 编译器（例如 WinLibs MinGW-w64）并加入 `PATH`。注意部分测试会 include `sys/mman.h` 与 `sys/select.h`，在 Windows 上根本无法编译，这些需在 Linux/macOS 上运行。
 
 ### 编译 APK
 

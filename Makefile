@@ -34,5 +34,14 @@ FORWARD_GOALS := $(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)
 # here. A phony target is an explicit target with no recipe, and such a target
 # shadows this pattern rule, so make would report "Nothing to be done" and
 # exit 0 without ever delegating.
+#
+# The recipe line is marked with `+` so make knows it is a recursive make
+# invocation.
+#
+# KNOWN LIMITATION: on this Windows toolchain (GnuWin32 make 3.81) the dry run
+# `make -n <goal>` fails with "make (e=87)" because the recursive make inherits
+# the dry-run flag through MAKEFLAGS. Real builds are unaffected -- `make
+# ghostlock` works. Use `make -C src -n <goal>` directly to preview what the
+# native build would do.
 %:
-	@"$(MAKE)" --no-print-directory -C $(SRC_DIR) $(FORWARD_GOALS)
+	+@"$(MAKE)" --no-print-directory -C $(SRC_DIR) $(FORWARD_GOALS)
