@@ -43,7 +43,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            tools/extract_rs/target
+            build/extract
           key: cargo-${{ runner.os }}-${{ hashFiles('tools/extract_rs/Cargo.lock') }}
 
       - name: Test extractor
@@ -81,8 +81,8 @@ jobs:
         run: |
           export ANDROID_NDK_HOME="${{ runner.temp }}/ondk"
           export NDK_ROOT="$ANDROID_NDK_HOME"
-          make ghostlock
-          "${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all ghostlock || true
+          make -C src ghostlock
+          "${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all build/native/ghostlock || true
 
       - name: Build Release APK
         run: |
@@ -97,23 +97,32 @@ jobs:
 
       - name: Strip Ghostlock binary
         run: |
-          "${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all ghostlock || true
+          "${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" --strip-all build/native/ghostlock || true
 
       - name: Rename Release APK
-        run: mv app/build/outputs/apk/release/*.apk GhostLock-release.apk
+        run: mv build/app/outputs/apk/release/*.apk GhostLock-release.apk
 
       - name: Prepare extractor binaries
         run: |
-          cp tools/extract_rs/target/release/ghostlock-extract tools/extract_rs/ghostlock-extract-linux-x86_64
+          cp build/extract/release/ghostlock-extract tools/extract_rs/ghostlock-extract-linux-x86_64
 
           export CC_aarch64_linux_android="${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
           export AR_aarch64_linux_android="${{ runner.temp }}/ondk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
           export RUSTC_BOOTSTRAP=1
           export RUSTFLAGS="-C force-unwind-tables=no -C link-arg=-Wl,--icf=all"
-          cargo +ondk build --release --target aarch64-linux-android --features http --manifest-path tools/extract_rs/Cargo.toml \
+          cargo +ondk build --release --target aarch64-linux-android --features http --manifest-path tools/extract_rs/Cargo.toml --target-dir build/extract \
             -Z build-std=std,panic_abort -Z build-std-features=optimize_for_size
-          cp tools/extract_rs/target/aarch64-linux-android/release/ghostlock-extract tools/extract_rs/ghostlock-extract-android-arm64
+          cp build/extract/aarch64-linux-android/release/ghostlock-extract tools/extract_rs/ghostlock-extract-android-arm64
+
+      - name: Export kernel profiles (GLK1)
+        run: ./gradlew exportKernelProfiles --no-daemon
+
+      - name: Package kernel profiles
+        run: |
+          cd build/kernel-profiles
+          zip -r "$GITHUB_WORKSPACE/GhostLock-kernel-profiles.zip" .
+          unzip -l "$GITHUB_WORKSPACE/GhostLock-kernel-profiles.zip" | tail -5
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v7
@@ -122,11 +131,18 @@ jobs:
           path: GhostLock-release.apk
           archive: false
 
+      - name: Upload kernel profiles
+        uses: actions/upload-artifact@v7
+        with:
+          name: GhostLock-kernel-profiles
+          path: GhostLock-kernel-profiles.zip
+          archive: false
+
       - name: Upload Ghostlock binary
         uses: actions/upload-artifact@v7
         with:
           name: ghostlock
-          path: ghostlock
+          path: build/native/ghostlock
           archive: false
 
       - name: Upload Extractor Linux
@@ -161,7 +177,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            tools/extract_rs/target
+            build/extract
           key: cargo-${{ runner.os }}-${{ hashFiles('tools/extract_rs/Cargo.lock') }}
 
       - name: Build macOS universal binary
@@ -171,8 +187,8 @@ jobs:
           cargo build --release --features http --target x86_64-apple-darwin
           mkdir -p bin
           lipo -create -output bin/ghostlock-extract-macos-universal \
-            target/aarch64-apple-darwin/release/ghostlock-extract \
-            target/x86_64-apple-darwin/release/ghostlock-extract
+            ../../build/extract/aarch64-apple-darwin/release/ghostlock-extract \
+            ../../build/extract/x86_64-apple-darwin/release/ghostlock-extract
 
       - name: Upload Extractor macOS
         uses: actions/upload-artifact@v7
@@ -197,7 +213,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            tools/extract_rs/target
+            build/extract
           key: cargo-${{ runner.os }}-${{ hashFiles('tools/extract_rs/Cargo.lock') }}
 
       - name: Build Windows binary
@@ -206,7 +222,7 @@ jobs:
         run: |
           cargo build --release --features http
           mkdir -p bin
-          cp target/release/ghostlock-extract.exe bin/ghostlock-extract-windows-x86_64.exe
+          cp ../../build/extract/release/ghostlock-extract.exe bin/ghostlock-extract-windows-x86_64.exe
 
       - name: Upload Extractor Windows
         uses: actions/upload-artifact@v7
@@ -232,6 +248,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           path: artifacts
+          skip-decompress: true
 
       - name: Prepare release files and notes
         run: |
@@ -240,7 +257,7 @@ jobs:
           chmod +x release-files/ghostlock release-files/ghostlock-extract-* || true
 
           cd release-files
-          for f in GhostLock-release.apk ghostlock ghostlock-extract-*; do
+          for f in GhostLock-release.apk ghostlock ghostlock-extract-* GhostLock-kernel-profiles.zip; do
             if [ -f "$f" ]; then
               sha256sum "$f"
             fi
@@ -284,6 +301,7 @@ jobs:
               "#### Files",
               "- `GhostLock-release.apk`: GhostLock Android Application",
               "- `ghostlock`: Standalone GhostLock native binary (Android arm64-v8a)",
+              "- `GhostLock-kernel-profiles.zip`: Bundled kernel profiles (HOCON)",
               "- `ghostlock-extract-android-arm64`: Kernel offset extractor CLI (Android arm64-v8a)",
               "- `ghostlock-extract-linux-x86_64`: Kernel offset extractor CLI (Linux x86_64)",
               "- `ghostlock-extract-macos-universal`: Kernel offset extractor CLI (macOS Universal arm64 + x86_64)",
@@ -334,6 +352,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+          skip-decompress: true
 
       - name: Post to Telegram
         env:

@@ -1,60 +1,22 @@
-API ?= 35
+# Root-level convenience wrapper.
+#
+# The native build itself lives in src/Makefile (the upstream layout) and is
+# expected to be invoked from src/: `make -C src ghostlock`. This wrapper only
+# forwards the historical root-level entry points (`make ghostlock`, `make`,
+# `make clean`, ...) to it, so existing scripts and the Windows quick-start
+# instructions keep working.
+#
+# Outputs are unchanged: the binary lands in build/native/ghostlock.
 
-# GnuWin32 make ships no rm.exe; route clean through cmd's del on Windows.
-ifeq ($(OS),Windows_NT)
-  RM := cmd /c del /f /q
-else
-  RM := rm -f
-endif
+SRC_DIR := src
 
-# Auto-detect NDK
-ifeq ($(OS),Windows_NT)
-  PREBUILT := windows-x86_64
-  NDK_CANDIDATES := \
-    $(subst \,/,$(wildcard $(subst \,/,$(LOCALAPPDATA))/Android/Sdk/ndk/*)) \
-    $(subst \,/,$(wildcard $(subst \,/,$(ANDROID_HOME))/ndk/*)) \
-    $(subst \,/,$(wildcard D:/AndroidSDK/ndk/*))
-  # Only NDKs that ship the aarch64-linux-android$(API) clang wrapper qualify;
-  # pick the newest such NDK (NDK directory names sort by version).
-  NDK_WITH_API := $(foreach d,$(NDK_CANDIDATES),$(if $(wildcard $(d)/toolchains/llvm/prebuilt/$(PREBUILT)/bin/aarch64-linux-android$(API)-clang.cmd),$(d)))
-  NDK_ROOT ?= $(if $(NDK_WITH_API),$(lastword $(sort $(NDK_WITH_API))),$(error No NDK supporting aarch64-linux-android$(API) found under LOCALAPPDATA/ANDROID_HOME. Install NDK r28+ or set NDK_ROOT=...))
-  override NDK_ROOT := $(subst \,/,$(NDK_ROOT))
-  CLANG_BASE := aarch64-linux-android$(API)-clang
-  NDK_CC := $(NDK_ROOT)/toolchains/llvm/prebuilt/$(PREBUILT)/bin/$(CLANG_BASE).cmd
-else
-  NDK_ROOT ?= $(or $(ANDROID_NDK_HOME),$(ANDROID_NDK_ROOT))
-  PREBUILT := linux-x86_64
-  NDK_CC := $(NDK_ROOT)/toolchains/llvm/prebuilt/$(PREBUILT)/bin/aarch64-linux-android$(API)-clang
-endif
+# Every goal is delegated verbatim, so `make ghostlock`, `make product`,
+# `make clean`, `make native-host-tests`, ... behave exactly as
+# `make -C src <goal>`; variables such as NDK_ROOT / API / TARGET_CONFIG are
+# passed through automatically by the recursive $(MAKE).
+%:
+	@$(MAKE) -C $(SRC_DIR) $@
 
-SRCS := \
-  src/core/main.c \
-  src/core/offsets_json.c \
-  src/core/util.c \
-  src/core/fops.c
+.DEFAULT_GOAL := ghostlock
 
-# Headers also trigger a rebuild (e.g. a freshly --register-ed src/kernels/<release>/offsets.h).
-HDRS := $(wildcard src/core/*.h src/core/*/*.h src/kernels/*.h src/kernels/*/*.h)
-
-# Device offsets are selected at runtime from uname -r.
-TARGET_CONFIG ?= target.h
-
-CFLAGS = -O2 -flto -Wall -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function \
-  -Isrc/core -Isrc/kernels -DTARGET_CONFIG_H=\"$(TARGET_CONFIG)\"
-LDFLAGS := -fPIE -pie -pthread -flto
-
-.PHONY: all clean product
-
-all: ghostlock
-
-ghostlock: $(SRCS) $(HDRS)
-	@echo "Using NDK compiler: $(NDK_CC)"
-	@echo "Target config: $(TARGET_CONFIG)"
-	$(NDK_CC) $(CFLAGS) $(LDFLAGS) $(SRCS) -o ghostlock
-
-product: ghostlock
-	@echo "=== ghostlock binary ready: ./ghostlock ==="
-	@echo "构建 APK: .\gradlew.bat :app:assembleDebug"
-
-clean:
-	-$(RM) ghostlock 2>nul
+.PHONY: all ghostlock product clean native-host-tests
