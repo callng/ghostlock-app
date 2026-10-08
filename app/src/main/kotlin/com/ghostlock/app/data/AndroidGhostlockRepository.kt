@@ -293,6 +293,7 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
         input: String,
         xblPath: String?,
         uefiPath: String?,
+        vendorBootPath: String?,
         overwrite: Boolean,
         onLog: (String) -> Unit,
     ): ParseResult {
@@ -340,6 +341,10 @@ class AndroidGhostlockRepository(context: Context) : GhostlockRepository {
                 if (uefiPath != null) {
                     add("--uefi")
                     add(uefiPath)
+                }
+                if (vendorBootPath != null) {
+                    add("--vendor-boot")
+                    add(vendorBootPath)
                 }
                 /* --format conf: the extractor output is already the flattened
                  * profile (no includes, credential template inlined), so the
